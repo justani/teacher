@@ -13,10 +13,10 @@
 
 ## Hierarchy
 
-- The session promise is the intro focal point: Georgia at `clamp(29px, 3vw, 44px)`, medium weight, tight tracking, and balanced wrapping.
-- Keep the class/topic as a small pine overline and the tutoring mechanism as smaller graphite supporting copy.
-- Use one stacked intro block, up to 900px wide, rather than splitting the promise and explanation across the screen.
+- The working area is the session focal point; introductory guidance should orient the learner without pushing the board below the fold.
+- Keep the class/topic as a small pine overline and the tutoring mechanism as a compact Georgia line.
+- On desktop, combine brand, lesson guidance, timer, and primary session action into one header row.
 
 ## Patterns
 
-- Session intro — topic overline, direct promise, then one short sentence explaining how Axiom helps. Supporting copy sits 10px below the headline and stays within 660px for readability.
+- Compact session header — brand, topic plus one direct sentence explaining how Axiom helps, timer, then primary action. Use `14–17px` Georgia for the guidance and remove a separate intro band so the workspace begins immediately below the header.

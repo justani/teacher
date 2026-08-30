@@ -650,17 +650,15 @@ export function TutorSession() {
     <main className="session-shell">
       <header className="session-header">
         <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">∠</span><div><span className="brand-name">Axiom</span><span className="brand-context">Personal maths session</span></div></div>
+        <div className="session-guidance">
+          <p className="overline">Class 9 · Circles</p>
+          <h1>Axiom guides you with focused questions.</h1>
+        </div>
         <div className="session-clock" aria-label={`${minutes} minutes and ${seconds} seconds remaining`}><span className="clock-label">Session time</span><strong>{minutes}:{seconds}</strong></div>
         <div className="header-actions">
           {isPreparing ? <button className="button button-primary" type="button" disabled><span className="button-loader" aria-hidden="true" />Preparing tutor</button> : sessionState !== "active" ? <button className="button button-primary" type="button" onClick={() => void startSession()} disabled={intakeState !== "confirmed"}><Icon name="play" />{sessionState === "ended" ? "Start again" : intakeState === "confirmed" ? "Retry session" : "Starts after crop"}</button> : <button className="button button-quiet button-danger" type="button" onClick={() => void endSession()}><Icon name="stop" />End session</button>}
         </div>
       </header>
-
-      <section className="session-intro" aria-labelledby="session-title">
-        <p className="overline">Class 9 · Circles</p>
-        <h1 id="session-title">Your tutor will guide you, one step at a time.</h1>
-        <p className="session-note">You do the thinking. Axiom asks focused questions and keeps the board clear.</p>
-      </section>
 
       <input ref={fileInputRef} className="visually-hidden" type="file" accept="image/*" onChange={handleUpload} />
 
