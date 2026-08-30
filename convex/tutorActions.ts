@@ -91,6 +91,20 @@ type RespondToAudioResult = {
   speechChunks: TutorSpeechChunk[];
 };
 
+const OPENING_OUTPUT_TOKENS = 1024;
+
+function openingGenerationOptions(prompt: string) {
+  return {
+    prompt,
+    maxOutputTokens: OPENING_OUTPUT_TOKENS,
+    providerOptions: {
+      google: {
+        thinkingConfig: { thinkingLevel: "minimal" as const },
+      },
+    },
+  };
+}
+
 function requiredEnv(name: string, value: string | undefined) {
   if (!value) throw new ConvexError(`${name} is not configured on the server.`);
   return value;
@@ -211,16 +225,31 @@ If the image is ambiguous or incomplete, set confidence to low and explain exact
         preparation,
       });
 
-      const generated = await createTutorAgent().generateText(
+      const tutorAgent = createTutorAgent();
+      let generated = await tutorAgent.generateText(
         ctx,
         { threadId: session.agentThreadId },
-        { prompt: buildOpeningPrompt(preparation), maxOutputTokens: 256 },
+        openingGenerationOptions(buildOpeningPrompt(preparation)),
+        { storageOptions: { saveMessages: "none" } },
       );
       if (generated.finishReason === "length") {
-        console.error("Tutor opening generation reached its output limit", {
+        console.warn("Tutor opening generation reached its output limit; retrying", {
           outputCharacters: generated.text.length,
         });
-        throw new ConvexError("The tutor's opening question was cut short. Please retry the session.");
+        generated = await tutorAgent.generateText(
+          ctx,
+          { threadId: session.agentThreadId },
+          openingGenerationOptions(`${buildOpeningPrompt(preparation)}
+
+Return exactly one short, complete Hinglish question. Use no preamble and no explanation.`),
+          { storageOptions: { saveMessages: "none" } },
+        );
+      }
+      if (generated.finishReason === "length") {
+        console.error("Tutor opening retry also reached its output limit", {
+          outputCharacters: generated.text.length,
+        });
+        throw new ConvexError("The tutor could not start this session cleanly. Please try again.");
       }
       const tutorReply = cleanTutorReply(generated.text);
       await ctx.runMutation(internal.tutorSessions.saveTurn, {
