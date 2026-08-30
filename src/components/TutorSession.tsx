@@ -541,9 +541,10 @@ export function TutorSession() {
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.code !== "Space" || event.repeat || isTypingTarget(event.target)) return;
-      if (!sessionId || sessionState !== "active" || voiceState !== "listening") return;
+      if (event.code !== "Space" || isTypingTarget(event.target)) return;
+      if (!sessionId || sessionState !== "active") return;
       event.preventDefault();
+      if (event.repeat || voiceState !== "listening") return;
       if (!talkPressActiveRef.current) {
         talkPressActiveRef.current = true;
         startRecordingShortcutRef.current();
@@ -552,8 +553,9 @@ export function TutorSession() {
 
     function handleKeyUp(event: KeyboardEvent) {
       if (event.code !== "Space" || isTypingTarget(event.target)) return;
-      if (!talkPressActiveRef.current && !isRecording) return;
+      if (!sessionId || sessionState !== "active") return;
       event.preventDefault();
+      if (!talkPressActiveRef.current && !isRecording) return;
       stopRecordingShortcutRef.current();
     }
 
