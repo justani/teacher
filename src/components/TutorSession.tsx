@@ -657,8 +657,9 @@ export function TutorSession() {
       </header>
 
       <section className="session-intro" aria-labelledby="session-title">
-        <div><p className="overline">Class 9 · Circles</p><h1 id="session-title">Let’s work through this together.</h1></div>
-        <p className="session-note">You do the thinking. Your tutor keeps the board clear and asks one question at a time.</p>
+        <p className="overline">Class 9 · Circles</p>
+        <h1 id="session-title">Your tutor will guide you, one step at a time.</h1>
+        <p className="session-note">You do the thinking. Axiom asks focused questions and keeps the board clear.</p>
       </section>
 
       <input ref={fileInputRef} className="visually-hidden" type="file" accept="image/*" onChange={handleUpload} />
