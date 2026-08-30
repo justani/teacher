@@ -1,0 +1,26 @@
+# dependencies
+/node_modules
+
+# Next.js
+/.next
+/out
+
+# local environment files
+.env*
+!.env.example
+
+# Vercel
+.vercel
+
+# Convex local state and generated code are safe to recreate
+.convex
+
+# editor and OS files
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+
+# local AI tooling
+/.agents
+/.claude
+/skills-lock.json

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1250" viewBox="0 0 900 1250">
+  <rect width="900" height="1250" fill="#d8d3c8"/>
+  <g transform="translate(72 48) rotate(-1 378 575)">
+    <rect x="8" y="12" width="756" height="1150" rx="5" fill="#000" opacity=".14"/>
+    <rect width="756" height="1150" rx="4" fill="#fffdf6"/>
+    <text x="52" y="66" fill="#315a4c" font-family="Arial" font-size="17" font-weight="700" letter-spacing="2">EXERCISE 11.3</text>
+    <text x="704" y="66" fill="#777" font-family="Arial" font-size="15">117</text>
+    <line x1="52" y1="88" x2="704" y2="88" stroke="#d6d1c5"/>
+    <text x="52" y="135" fill="#333" font-family="Georgia" font-size="23">7. Find the area of a semicircle with diameter 14 cm.</text>
+    <line x1="52" y1="180" x2="704" y2="180" stroke="#ebe6da"/>
+    <text x="52" y="230" fill="#222" font-family="Georgia" font-size="25" font-weight="700">8.</text>
+    <text x="92" y="230" fill="#222" font-family="Georgia" font-size="25">Find the area of a sector of a circle with radius</text>
+    <text x="92" y="270" fill="#222" font-family="Georgia" font-size="25">7 cm if the angle of the sector is 60°.</text>
+    <g transform="translate(242 310)">
+      <path d="M0 236 A236 236 0 0 1 220 10 L0 236Z" fill="#efd8cc" stroke="#313b37" stroke-width="4"/>
+      <path d="M0 236h220M0 236L220 10" fill="none" stroke="#313b37" stroke-width="4"/>
+      <path d="M62 236a62 62 0 0 0-18-44" fill="none" stroke="#313b37" stroke-width="3"/>
+      <text x="66" y="207" fill="#313b37" font-family="Arial" font-size="24">60°</text>
+      <text x="102" y="272" fill="#313b37" font-family="Arial" font-size="22">7 cm</text>
+    </g>
+    <line x1="52" y1="630" x2="704" y2="630" stroke="#ebe6da"/>
+    <text x="52" y="684" fill="#333" font-family="Georgia" font-size="23">9. A circular garden has a radius of 21 m. Find its area.</text>
+    <line x1="52" y1="730" x2="704" y2="730" stroke="#ebe6da"/>
+    <text x="52" y="784" fill="#333" font-family="Georgia" font-size="23">10. Find the circumference of the following circles.</text>
+    <circle cx="222" cy="920" r="96" fill="none" stroke="#56605c" stroke-width="4"/>
+    <line x1="126" y1="920" x2="318" y2="920" stroke="#56605c" stroke-width="3"/>
+    <text x="188" y="908" fill="#56605c" font-family="Arial" font-size="19">14 cm</text>
+    <circle cx="520" cy="920" r="112" fill="none" stroke="#56605c" stroke-width="4"/>
+    <line x1="520" y1="920" x2="632" y2="920" stroke="#56605c" stroke-width="3"/>
+    <text x="552" y="907" fill="#56605c" font-family="Arial" font-size="19">10 cm</text>
+    <text x="52" y="1100" fill="#888" font-family="Arial" font-size="14">Circles · Areas related to circles</text>
+  </g>
+</svg>
