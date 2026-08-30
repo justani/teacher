@@ -1,5 +1,12 @@
 const SAMPLE_RATE = 24000;
 
+type SpeechTelemetry = {
+  onResponseHeaders?: (elapsedMs: number) => void;
+  onFirstAudio?: (elapsedMs: number) => void;
+  onStreamComplete?: (elapsedMs: number) => void;
+  onPlaybackComplete?: (elapsedMs: number) => void;
+};
+
 function mergeWithCarry(carry: Uint8Array, chunk: Uint8Array) {
   if (carry.length === 0) return chunk;
   const merged = new Uint8Array(carry.length + chunk.length);
@@ -8,7 +15,12 @@ function mergeWithCarry(carry: Uint8Array, chunk: Uint8Array) {
   return merged;
 }
 
-export async function playTutorSpeech(context: AudioContext, text: string) {
+export async function playTutorSpeech(
+  context: AudioContext,
+  text: string,
+  telemetry: SpeechTelemetry = {},
+) {
+  const startedAt = performance.now();
   if (context.state === "suspended") await context.resume();
 
   const response = await fetch("/api/tts/stream", {
@@ -16,6 +28,7 @@ export async function playTutorSpeech(context: AudioContext, text: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   });
+  telemetry.onResponseHeaders?.(performance.now() - startedAt);
 
   if (!response.ok || !response.body) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -51,11 +64,14 @@ export async function playTutorSpeech(context: AudioContext, text: string) {
     nextStartTime = Math.max(nextStartTime, context.currentTime + 0.02);
     source.start(nextStartTime);
     nextStartTime += audioBuffer.duration;
+    if (!scheduledAudio) telemetry.onFirstAudio?.(performance.now() - startedAt);
     scheduledAudio = true;
   }
 
   if (!scheduledAudio) throw new Error("Tutor audio was empty.");
+  telemetry.onStreamComplete?.(performance.now() - startedAt);
 
   const remainingMilliseconds = Math.max(0, (nextStartTime - context.currentTime) * 1000);
   await new Promise((resolve) => window.setTimeout(resolve, remainingMilliseconds));
+  telemetry.onPlaybackComplete?.(performance.now() - startedAt);
 }

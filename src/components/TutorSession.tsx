@@ -30,6 +30,7 @@ type TranscriptTurn = {
   speaker: "learner" | "tutor";
   text: string;
 };
+type ResponseTiming = { flow: "opening" | "learner_turn"; startedAt: number };
 
 const DEFAULT_CROP: CropSelection = { x: 8, y: 18, width: 84, height: 38 };
 const MIN_CROP_PERCENT = 6;
@@ -42,6 +43,18 @@ const voiceCopy: Record<VoiceState, { label: string; detail: string }> = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function logFrontendTiming(
+  event: string,
+  startedAt: number,
+  details: Record<string, string | number> = {},
+) {
+  console.info("[Tutor telemetry]", {
+    event,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    ...details,
+  });
 }
 
 function Icon({ name }: { name: "upload" | "mic" | "stop" | "play" | "image" | "crop" | "reset" }) {
@@ -110,6 +123,7 @@ export function TutorSession() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const talkPressActiveRef = useRef(false);
   const discardRecordingRef = useRef(false);
+  const responseStartedAtRef = useRef<number | null>(null);
   const startRecordingShortcutRef = useRef<() => void>(() => undefined);
   const stopRecordingShortcutRef = useRef<() => void>(() => undefined);
   const boardRef = useRef<SharedMathBoardHandle>(null);
@@ -243,17 +257,33 @@ export function TutorSession() {
   async function speakTutorTurn(
     chunks: Array<{ say: string; actions: BoardAction[] }>,
     activeSessionId: Id<"tutorSessions">,
+    timing?: ResponseTiming,
   ) {
     setVoiceState("speaking");
     let tutorUsedBoard = false;
     try {
-      for (const chunk of chunks) {
+      for (const [chunkIndex, chunk] of chunks.entries()) {
         if (chunk.actions.length > 0) {
           boardRef.current?.applyTutorActions(chunk.actions);
           tutorUsedBoard = true;
         }
-        await playTutorSpeech(getAudioContext(), chunk.say);
+        await playTutorSpeech(getAudioContext(), chunk.say, chunkIndex === 0 && timing ? {
+          onResponseHeaders: (stageMs) => logFrontendTiming("tts_response_headers", timing.startedAt, {
+            flow: timing.flow,
+            ttsStageMs: Math.round(stageMs),
+          }),
+          onFirstAudio: (stageMs) => logFrontendTiming("first_audio_scheduled", timing.startedAt, {
+            flow: timing.flow,
+            ttsStageMs: Math.round(stageMs),
+          }),
+          onStreamComplete: (stageMs) => logFrontendTiming("tts_stream_complete", timing.startedAt, {
+            flow: timing.flow,
+            ttsStageMs: Math.round(stageMs),
+          }),
+        } : undefined);
       }
+
+      if (timing) logFrontendTiming("tutor_playback_complete", timing.startedAt, { flow: timing.flow });
 
       if (tutorUsedBoard) {
         const checkpoint = await boardRef.current?.captureCheckpoint();
@@ -275,6 +305,8 @@ export function TutorSession() {
 
   async function startSession() {
     if (intakeState !== "confirmed" || !croppedUrl || sessionState === "active") return;
+    const startedAt = performance.now();
+    logFrontendTiming("opening_started", startedAt, { flow: "opening" });
     setErrorMessage("");
     setSessionState("active");
     setVoiceState("thinking");
@@ -284,15 +316,23 @@ export function TutorSession() {
       await getAudioContext().resume();
       const imageBlob = await fetch(croppedUrl).then((response) => response.blob());
       const problemImageId = await uploadBlob(imageBlob);
+      logFrontendTiming("problem_image_uploaded", startedAt, { flow: "opening" });
       const newSessionId = await createTutorSession({
         problemImageId,
         sourceFileName: fileName || "problem.jpg",
       });
       setSessionId(newSessionId);
+      logFrontendTiming("session_created", startedAt, { flow: "opening" });
       const prepared = await prepareTutor({ sessionId: newSessionId });
+      logFrontendTiming("tutor_text_ready", startedAt, { flow: "opening" });
       try {
-        await speakTutorTurn([{ say: prepared.tutorReply, actions: [] }], newSessionId);
+        await speakTutorTurn(
+          [{ say: prepared.tutorReply, actions: [] }],
+          newSessionId,
+          { flow: "opening", startedAt },
+        );
       } catch (error) {
+        logFrontendTiming("opening_audio_failed", startedAt, { flow: "opening" });
         setErrorMessage(
           error instanceof Error
             ? `${error.message} You can still hold the mic and reply.`
@@ -301,6 +341,7 @@ export function TutorSession() {
         setVoiceState("listening");
       }
     } catch (error) {
+      logFrontendTiming("opening_failed", startedAt, { flow: "opening" });
       setErrorMessage(error instanceof Error ? error.message : "The tutor could not start.");
       setVoiceState("listening");
       setSessionState("ready");
@@ -308,8 +349,12 @@ export function TutorSession() {
     }
   }
 
-  async function submitRecording(blob: Blob) {
+  async function submitRecording(blob: Blob, startedAt: number) {
     if (!sessionId) return;
+    logFrontendTiming("recording_ready", startedAt, {
+      flow: "learner_turn",
+      audioBytes: blob.size,
+    });
     setErrorMessage("");
     setVoiceState("thinking");
     try {
@@ -322,16 +367,20 @@ export function TutorSession() {
         document: checkpoint.document,
         summary: checkpoint.summary,
       });
+      logFrontendTiming("board_checkpoint_saved", startedAt, { flow: "learner_turn" });
       const audioStorageId = await uploadBlob(blob);
       const boardImageId = checkpoint.image ? await uploadBlob(checkpoint.image) : undefined;
+      logFrontendTiming("turn_inputs_uploaded", startedAt, { flow: "learner_turn" });
       const result = await respondToAudio({
         sessionId,
         audioStorageId,
         boardImageId,
         boardSummary: checkpoint.summary,
       });
-      await speakTutorTurn(result.speechChunks, sessionId);
+      logFrontendTiming("tutor_text_ready", startedAt, { flow: "learner_turn" });
+      await speakTutorTurn(result.speechChunks, sessionId, { flow: "learner_turn", startedAt });
     } catch (error) {
+      logFrontendTiming("learner_turn_failed", startedAt, { flow: "learner_turn" });
       setErrorMessage(error instanceof Error ? error.message : "I could not process that answer.");
       setVoiceState("listening");
     }
@@ -364,8 +413,10 @@ export function TutorSession() {
         const audio = new Blob(audioChunksRef.current, {
           type: recorder.mimeType || preferredType || "application/octet-stream",
         });
+        const responseStartedAt = responseStartedAtRef.current ?? performance.now();
+        responseStartedAtRef.current = null;
         audioChunksRef.current = [];
-        if (!discardRecordingRef.current && audio.size > 0) void submitRecording(audio);
+        if (!discardRecordingRef.current && audio.size > 0) void submitRecording(audio, responseStartedAt);
         discardRecordingRef.current = false;
       };
       recorder.start(250);
@@ -388,7 +439,12 @@ export function TutorSession() {
       window.clearTimeout(recordingTimeoutRef.current);
       recordingTimeoutRef.current = null;
     }
-    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    if (recorderRef.current?.state === "recording") {
+      const startedAt = performance.now();
+      responseStartedAtRef.current = startedAt;
+      logFrontendTiming("learner_response_started", startedAt, { flow: "learner_turn" });
+      recorderRef.current.stop();
+    }
   }
 
   function beginTalkPress(event?: ReactPointerEvent<HTMLButtonElement>) {
