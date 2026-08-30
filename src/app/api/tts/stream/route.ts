@@ -54,7 +54,7 @@ export async function POST(request: Request) {
   try {
     stream = await createGeminiClient().models.generateContentStream({
       model: process.env.GEMINI_TTS_MODEL ?? "gemini-3.1-flash-tts-preview",
-      contents: `Speak as a warm, concise female Indian maths tutor. Read only this response naturally, including any Hinglish and spoken maths:\n\n${text}`,
+      contents: `Speak as a warm, concise female Indian maths tutor. Read only this response naturally. Pronounce Roman-script Hinglish conversationally, including familiar English maths terms:\n\n${text}`,
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
