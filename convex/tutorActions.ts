@@ -91,6 +91,16 @@ type RespondToAudioResult = {
   speechChunks: TutorSpeechChunk[];
 };
 
+type BackendLatencyOutcome = "success" | "error";
+type BackendLatencyStage =
+  | "image_load"
+  | "extraction"
+  | "opening_generation"
+  | "audio_load"
+  | "stt"
+  | "tutor_generation"
+  | "complete";
+
 const OPENING_OUTPUT_TOKENS = 1024;
 
 function openingGenerationOptions(prompt: string) {
@@ -103,6 +113,10 @@ function openingGenerationOptions(prompt: string) {
       },
     },
   };
+}
+
+function elapsedMs(startedAt: number) {
+  return Math.max(0, Date.now() - startedAt);
 }
 
 function requiredEnv(name: string, value: string | undefined) {
@@ -170,6 +184,13 @@ export const prepare = action({
   args: { sessionId: v.id("tutorSessions") },
   returns: v.object({ problemText: v.string(), tutorReply: v.string() }),
   handler: async (ctx, args): Promise<{ problemText: string; tutorReply: string }> => {
+    const actionStartedAt = Date.now();
+    let outcome: BackendLatencyOutcome = "error";
+    let stage: BackendLatencyStage = "image_load";
+    let imageLoadMs: number | undefined;
+    let extractionMs: number | undefined;
+    let openingGenerationMs: number | undefined;
+    let openingRetryCount = 0;
     const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
       internal.tutorSessions.getInternal,
       args,
@@ -177,37 +198,51 @@ export const prepare = action({
     if (!session) throw new ConvexError("Session not found.");
 
     try {
-      const image: Blob | null = await ctx.storage.get(session.problemImageId);
+      const imageLoadStartedAt = Date.now();
+      let image: Blob | null;
+      try {
+        image = await ctx.storage.get(session.problemImageId);
+      } finally {
+        imageLoadMs = elapsedMs(imageLoadStartedAt);
+      }
       if (!image) throw new ConvexError("The cropped image is no longer available.");
       if (image.size > 8 * 1024 * 1024) {
         throw new ConvexError("Please crop a smaller image under 8 MB.");
       }
 
       const { provider, model } = createGeminiProvider();
-      const { object: preparation }: { object: z.infer<typeof preparationSchema> } = await generateObject({
-        model: provider(model),
-        schema: preparationSchema,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Read the single school maths problem in this cropped image and privately prepare a tutor to teach it Socratically.
+      stage = "extraction";
+      const extractionStartedAt = Date.now();
+      let preparation: z.infer<typeof preparationSchema>;
+      try {
+        const result: { object: z.infer<typeof preparationSchema> } = await generateObject({
+          model: provider(model),
+          schema: preparationSchema,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: `Read the single school maths problem in this cropped image and privately prepare a tutor to teach it Socratically.
 
 Transcribe the complete problem faithfully, including labels, symbols, units, and any diagram information needed to solve it. Compute and verify the answer yourself. Build a solution map and flexible teaching moves, not a dialogue script.
 
 If the image is ambiguous or incomplete, set confidence to low and explain exactly what clarification is needed. Do not invent missing numbers or diagram labels. Keep arrays compact and ordered from least help to most help.`,
-              },
-              {
-                type: "image",
-                image: new Uint8Array(await image.arrayBuffer()),
-                mediaType: image.type || "image/jpeg",
-              },
-            ],
-          },
-        ],
-      });
+                },
+                {
+                  type: "image",
+                  image: new Uint8Array(await image.arrayBuffer()),
+                  mediaType: image.type || "image/jpeg",
+                },
+              ],
+            },
+          ],
+        });
+        preparation = result.object;
+      } finally {
+        extractionMs = elapsedMs(extractionStartedAt);
+      }
 
       if (preparation.confidence === "low" || preparation.clarificationNeeded) {
         const clarification =
@@ -226,24 +261,32 @@ If the image is ambiguous or incomplete, set confidence to low and explain exact
       });
 
       const tutorAgent = createTutorAgent();
-      let generated = await tutorAgent.generateText(
-        ctx,
-        { threadId: session.agentThreadId },
-        openingGenerationOptions(buildOpeningPrompt(preparation)),
-        { storageOptions: { saveMessages: "none" } },
-      );
-      if (generated.finishReason === "length") {
-        console.warn("Tutor opening generation reached its output limit; retrying", {
-          outputCharacters: generated.text.length,
-        });
+      stage = "opening_generation";
+      const openingStartedAt = Date.now();
+      let generated;
+      try {
         generated = await tutorAgent.generateText(
           ctx,
           { threadId: session.agentThreadId },
-          openingGenerationOptions(`${buildOpeningPrompt(preparation)}
-
-Return exactly one short, complete Hinglish question. Use no preamble and no explanation.`),
+          openingGenerationOptions(buildOpeningPrompt(preparation)),
           { storageOptions: { saveMessages: "none" } },
         );
+        if (generated.finishReason === "length") {
+          openingRetryCount = 1;
+          console.warn("Tutor opening generation reached its output limit; retrying", {
+            outputCharacters: generated.text.length,
+          });
+          generated = await tutorAgent.generateText(
+            ctx,
+            { threadId: session.agentThreadId },
+            openingGenerationOptions(`${buildOpeningPrompt(preparation)}
+
+Return exactly one short, complete Hinglish question. Use no preamble and no explanation.`),
+            { storageOptions: { saveMessages: "none" } },
+          );
+        }
+      } finally {
+        openingGenerationMs = elapsedMs(openingStartedAt);
       }
       if (generated.finishReason === "length") {
         console.error("Tutor opening retry also reached its output limit", {
@@ -259,6 +302,8 @@ Return exactly one short, complete Hinglish question. Use no preamble and no exp
         nextStatus: "speaking",
       });
 
+      outcome = "success";
+      stage = "complete";
       return { problemText: preparation.problemText, tutorReply };
     } catch (error) {
       const message = safeProviderMessage(error);
@@ -269,9 +314,24 @@ Return exactly one short, complete Hinglish question. Use no preamble and no exp
       });
       throw new ConvexError(message);
     } finally {
-      await ctx.runMutation(internal.tutorSessions.deleteStorageObject, {
-        storageId: session.problemImageId,
-      });
+      await ctx
+        .runMutation(internal.tutorSessions.deleteStorageObject, {
+          storageId: session.problemImageId,
+        })
+        .catch((error) => console.error("Could not delete problem image", error));
+      await ctx
+        .runMutation(internal.tutorSessions.recordBackendLatency, {
+          sessionId: args.sessionId,
+          flow: "opening",
+          outcome,
+          stage,
+          totalMs: elapsedMs(actionStartedAt),
+          imageLoadMs,
+          extractionMs,
+          openingGenerationMs,
+          openingRetryCount,
+        })
+        .catch((error) => console.error("Could not store opening latency", error));
     }
   },
 });
@@ -301,6 +361,12 @@ export const respondToAudio = action({
     ),
   }),
   handler: async (ctx, args): Promise<RespondToAudioResult> => {
+    const actionStartedAt = Date.now();
+    let outcome: BackendLatencyOutcome = "error";
+    let stage: BackendLatencyStage = "audio_load";
+    let audioLoadMs: number | undefined;
+    let sttMs: number | undefined;
+    let tutorGenerationMs: number | undefined;
     const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
       internal.tutorSessions.getInternal,
       {
@@ -315,7 +381,13 @@ export const respondToAudio = action({
     });
 
     try {
-      const audio = await ctx.storage.get(args.audioStorageId);
+      const audioLoadStartedAt = Date.now();
+      let audio: Blob | null;
+      try {
+        audio = await ctx.storage.get(args.audioStorageId);
+      } finally {
+        audioLoadMs = elapsedMs(audioLoadStartedAt);
+      }
       if (!audio) throw new ConvexError("The recording is no longer available.");
       if (audio.size > 8 * 1024 * 1024) {
         throw new ConvexError("Please keep each answer under 30 seconds.");
@@ -332,13 +404,20 @@ export const respondToAudio = action({
       form.append("mode", "translit");
       form.append("language_code", "unknown");
 
-      const sttResponse = await fetch("https://api.sarvam.ai/speech-to-text", {
-        method: "POST",
-        headers: {
-          "api-subscription-key": requiredEnv("SARVAM_API_KEY", env.SARVAM_API_KEY),
-        },
-        body: form,
-      });
+      stage = "stt";
+      const sttStartedAt = Date.now();
+      let sttResponse: Response;
+      try {
+        sttResponse = await fetch("https://api.sarvam.ai/speech-to-text", {
+          method: "POST",
+          headers: {
+            "api-subscription-key": requiredEnv("SARVAM_API_KEY", env.SARVAM_API_KEY),
+          },
+          body: form,
+        });
+      } finally {
+        sttMs = elapsedMs(sttStartedAt);
+      }
 
       if (!sttResponse.ok) {
         const providerBody: unknown = await sttResponse.json().catch(() => null);
@@ -401,15 +480,23 @@ export const respondToAudio = action({
         });
       }
 
-      const { object }: { object: TutorTurnPlan } = await createTutorAgent().generateObject(
-        ctx,
-        { threadId: session.agentThreadId },
-        {
-          schema: tutorTurnSchema,
-          messages: [{ role: "user", content }],
-          maxOutputTokens: 360,
-        },
-      );
+      stage = "tutor_generation";
+      const tutorGenerationStartedAt = Date.now();
+      let object: TutorTurnPlan;
+      try {
+        const result: { object: TutorTurnPlan } = await createTutorAgent().generateObject(
+          ctx,
+          { threadId: session.agentThreadId },
+          {
+            schema: tutorTurnSchema,
+            messages: [{ role: "user", content }],
+            maxOutputTokens: 360,
+          },
+        );
+        object = result.object;
+      } finally {
+        tutorGenerationMs = elapsedMs(tutorGenerationStartedAt);
+      }
       const speechChunks: TutorSpeechChunk[] = object.chunks.map((chunk) => ({
         say: cleanTutorReply(chunk.say),
         actions: chunk.actions,
@@ -424,6 +511,8 @@ export const respondToAudio = action({
         speechChunks,
       });
 
+      outcome = "success";
+      stage = "complete";
       return { transcript, tutorReply, speechChunks };
     } catch (error) {
       const message = safeProviderMessage(error);
@@ -434,14 +523,30 @@ export const respondToAudio = action({
       });
       throw new ConvexError(message);
     } finally {
-      await ctx.runMutation(internal.tutorSessions.deleteStorageObject, {
-        storageId: args.audioStorageId,
-      });
+      await ctx
+        .runMutation(internal.tutorSessions.deleteStorageObject, {
+          storageId: args.audioStorageId,
+        })
+        .catch((error) => console.error("Could not delete learner audio", error));
       if (args.boardImageId) {
-        await ctx.runMutation(internal.tutorSessions.deleteStorageObject, {
-          storageId: args.boardImageId,
-        });
+        await ctx
+          .runMutation(internal.tutorSessions.deleteStorageObject, {
+            storageId: args.boardImageId,
+          })
+          .catch((error) => console.error("Could not delete board image", error));
       }
+      await ctx
+        .runMutation(internal.tutorSessions.recordBackendLatency, {
+          sessionId: args.sessionId,
+          flow: "learner_turn",
+          outcome,
+          stage,
+          totalMs: elapsedMs(actionStartedAt),
+          audioLoadMs,
+          sttMs,
+          tutorGenerationMs,
+        })
+        .catch((error) => console.error("Could not store learner-turn latency", error));
     }
   },
 });

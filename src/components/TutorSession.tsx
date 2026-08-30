@@ -129,6 +129,7 @@ export function TutorSession() {
   const generateUploadUrl = useMutation(api.tutorSessions.generateUploadUrl);
   const createTutorSession = useMutation(api.tutorSessions.create);
   const finishPlayback = useMutation(api.tutorSessions.finishPlayback);
+  const recordTtsLatency = useMutation(api.tutorSessions.recordTtsLatency);
   const saveBoardCheckpoint = useMutation(api.tutorSessions.saveBoardCheckpoint);
   const endTutorSession = useMutation(api.tutorSessions.end);
   const prepareTutor = useAction(api.tutorActions.prepare);
@@ -267,20 +268,68 @@ export function TutorSession() {
           boardRef.current?.applyTutorActions(chunk.actions);
           tutorUsedBoard = true;
         }
-        await playTutorSpeech(getAudioContext(), chunk.say, chunkIndex === 0 && timing ? {
-          onResponseHeaders: (stageMs) => logFrontendTiming("tts_response_headers", timing.startedAt, {
+        const shouldMeasureTts = chunkIndex === 0 && Boolean(timing);
+        const ttsStartedAt = performance.now();
+        const ttsMetrics: {
+          responseHeadersMs?: number;
+          firstAudioMs?: number;
+          streamCompleteMs?: number;
+          playbackCompleteMs?: number;
+        } = {};
+        try {
+          await playTutorSpeech(getAudioContext(), chunk.say, shouldMeasureTts && timing ? {
+            onResponseHeaders: (stageMs) => {
+              ttsMetrics.responseHeadersMs = Math.round(stageMs);
+              logFrontendTiming("tts_response_headers", timing.startedAt, {
+                flow: timing.flow,
+                ttsStageMs: Math.round(stageMs),
+              });
+            },
+            onFirstAudio: (stageMs) => {
+              ttsMetrics.firstAudioMs = Math.round(stageMs);
+              logFrontendTiming("first_audio_scheduled", timing.startedAt, {
+                flow: timing.flow,
+                ttsStageMs: Math.round(stageMs),
+              });
+            },
+            onStreamComplete: (stageMs) => {
+              ttsMetrics.streamCompleteMs = Math.round(stageMs);
+              logFrontendTiming("tts_stream_complete", timing.startedAt, {
+                flow: timing.flow,
+                ttsStageMs: Math.round(stageMs),
+              });
+            },
+            onPlaybackComplete: (stageMs) => {
+              ttsMetrics.playbackCompleteMs = Math.round(stageMs);
+            },
+          } : undefined);
+        } catch (error) {
+          if (shouldMeasureTts && timing) {
+            void recordTtsLatency({
+              sessionId: activeSessionId,
+              flow: timing.flow,
+              outcome: "error",
+              totalMs: Math.round(performance.now() - ttsStartedAt),
+              ttsResponseHeadersMs: ttsMetrics.responseHeadersMs,
+              ttsFirstAudioMs: ttsMetrics.firstAudioMs,
+              ttsStreamCompleteMs: ttsMetrics.streamCompleteMs,
+              ttsPlaybackCompleteMs: ttsMetrics.playbackCompleteMs,
+            }).catch((telemetryError) => console.error("Could not store TTS latency", telemetryError));
+          }
+          throw error;
+        }
+        if (shouldMeasureTts && timing) {
+          void recordTtsLatency({
+            sessionId: activeSessionId,
             flow: timing.flow,
-            ttsStageMs: Math.round(stageMs),
-          }),
-          onFirstAudio: (stageMs) => logFrontendTiming("first_audio_scheduled", timing.startedAt, {
-            flow: timing.flow,
-            ttsStageMs: Math.round(stageMs),
-          }),
-          onStreamComplete: (stageMs) => logFrontendTiming("tts_stream_complete", timing.startedAt, {
-            flow: timing.flow,
-            ttsStageMs: Math.round(stageMs),
-          }),
-        } : undefined);
+            outcome: "success",
+            totalMs: Math.round(performance.now() - ttsStartedAt),
+            ttsResponseHeadersMs: ttsMetrics.responseHeadersMs,
+            ttsFirstAudioMs: ttsMetrics.firstAudioMs,
+            ttsStreamCompleteMs: ttsMetrics.streamCompleteMs,
+            ttsPlaybackCompleteMs: ttsMetrics.playbackCompleteMs,
+          }).catch((telemetryError) => console.error("Could not store TTS latency", telemetryError));
+        }
       }
 
       if (timing) logFrontendTiming("tutor_playback_complete", timing.startedAt, { flow: timing.flow });

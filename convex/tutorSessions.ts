@@ -2,7 +2,16 @@ import { createThread } from "@convex-dev/agent";
 import { v } from "convex/values";
 import { components } from "./_generated/api";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
-import schema, { privatePreparation, sessionStatus, tutorSpeechChunk } from "./schema";
+import schema, {
+  latencyFlow,
+  latencyOutcome,
+  latencyStage,
+  privatePreparation,
+  sessionStatus,
+  tutorSpeechChunk,
+} from "./schema";
+
+const optionalDuration = v.optional(v.number());
 
 export const generateUploadUrl = mutation({
   args: {},
@@ -178,6 +187,63 @@ export const saveTurn = internalMutation({
       errorMessage: undefined,
     });
     return turnId;
+  },
+});
+
+export const recordBackendLatency = internalMutation({
+  args: {
+    sessionId: v.id("tutorSessions"),
+    flow: latencyFlow,
+    outcome: latencyOutcome,
+    stage: latencyStage,
+    totalMs: v.number(),
+    imageLoadMs: optionalDuration,
+    extractionMs: optionalDuration,
+    openingGenerationMs: optionalDuration,
+    openingRetryCount: v.optional(v.number()),
+    audioLoadMs: optionalDuration,
+    sttMs: optionalDuration,
+    tutorGenerationMs: optionalDuration,
+  },
+  returns: v.id("tutorLatencyEvents"),
+  handler: async (ctx, args) => {
+    return ctx.db.insert("tutorLatencyEvents", {
+      ...args,
+      source: "backend_action",
+    });
+  },
+});
+
+export const recordTtsLatency = mutation({
+  args: {
+    sessionId: v.id("tutorSessions"),
+    flow: latencyFlow,
+    outcome: latencyOutcome,
+    totalMs: v.number(),
+    ttsResponseHeadersMs: optionalDuration,
+    ttsFirstAudioMs: optionalDuration,
+    ttsStreamCompleteMs: optionalDuration,
+    ttsPlaybackCompleteMs: optionalDuration,
+  },
+  returns: v.id("tutorLatencyEvents"),
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get("tutorSessions", args.sessionId);
+    if (!session) throw new Error("Session not found.");
+    const durations = [
+      args.totalMs,
+      args.ttsResponseHeadersMs,
+      args.ttsFirstAudioMs,
+      args.ttsStreamCompleteMs,
+      args.ttsPlaybackCompleteMs,
+    ];
+    if (durations.some((duration) => duration !== undefined && (duration < 0 || duration > 600_000))) {
+      throw new Error("Invalid latency duration.");
+    }
+    return ctx.db.insert("tutorLatencyEvents", {
+      ...args,
+      source: "client_tts",
+      stage: args.outcome === "success" ? "complete" : "tts",
+    });
   },
 });
 

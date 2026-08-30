@@ -79,6 +79,32 @@ export const tutorSpeechChunk = v.object({
   actions: v.array(boardAction),
 });
 
+export const latencyFlow = v.union(
+  v.literal("opening"),
+  v.literal("learner_turn"),
+);
+
+export const latencySource = v.union(
+  v.literal("backend_action"),
+  v.literal("client_tts"),
+);
+
+export const latencyOutcome = v.union(
+  v.literal("success"),
+  v.literal("error"),
+);
+
+export const latencyStage = v.union(
+  v.literal("image_load"),
+  v.literal("extraction"),
+  v.literal("opening_generation"),
+  v.literal("audio_load"),
+  v.literal("stt"),
+  v.literal("tutor_generation"),
+  v.literal("tts"),
+  v.literal("complete"),
+);
+
 const schema = defineSchema({
   tasks: defineTable({
     title: v.string(),
@@ -107,6 +133,25 @@ const schema = defineSchema({
     revision: v.number(),
     document: v.string(),
     summary: v.string(),
+  }).index("by_sessionId", ["sessionId"]),
+  tutorLatencyEvents: defineTable({
+    sessionId: v.id("tutorSessions"),
+    flow: latencyFlow,
+    source: latencySource,
+    outcome: latencyOutcome,
+    stage: latencyStage,
+    totalMs: v.number(),
+    imageLoadMs: v.optional(v.number()),
+    extractionMs: v.optional(v.number()),
+    openingGenerationMs: v.optional(v.number()),
+    openingRetryCount: v.optional(v.number()),
+    audioLoadMs: v.optional(v.number()),
+    sttMs: v.optional(v.number()),
+    tutorGenerationMs: v.optional(v.number()),
+    ttsResponseHeadersMs: v.optional(v.number()),
+    ttsFirstAudioMs: v.optional(v.number()),
+    ttsStreamCompleteMs: v.optional(v.number()),
+    ttsPlaybackCompleteMs: v.optional(v.number()),
   }).index("by_sessionId", ["sessionId"]),
 });
 
