@@ -36,7 +36,7 @@ const DEFAULT_CROP: CropSelection = { x: 8, y: 18, width: 84, height: 38 };
 const MIN_CROP_PERCENT = 6;
 
 const voiceCopy: Record<VoiceState, { label: string; detail: string }> = {
-  listening: { label: "Listening", detail: "Tell me what the question is asking us to find." },
+  listening: { label: "Listening", detail: "" },
   thinking: { label: "Thinking", detail: "I’m considering the smallest useful next question." },
   speaking: { label: "Speaking", detail: "Area of a sector uses part of the circle’s area." },
 };
@@ -519,9 +519,12 @@ export function TutorSession() {
   const minutes = Math.floor(secondsRemaining / 60).toString().padStart(2, "0");
   const seconds = (secondsRemaining % 60).toString().padStart(2, "0");
   const learnerCanAnswer = sessionState === "active" && Boolean(sessionId) && voiceState === "listening" && !isPreparing;
+  const voiceDetail = sessionState === "ended"
+    ? "Your question and transcript are still here."
+    : errorMessage || (isRecording ? "Keep holding while you answer." : voiceCopy[voiceState].detail);
   const voiceDock = (
     <section className={`voice-dock voice-${voiceState} ${learnerCanAnswer ? "ready-to-speak" : ""} ${intakeState !== "confirmed" ? "intake-open" : ""}`} aria-label="Tutor voice controls">
-      <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : isRecording ? "Listening" : voiceCopy[voiceState].label}</strong><p>{sessionState === "ended" ? "Your question and transcript are still here." : errorMessage || (isRecording ? "Keep holding while you answer." : voiceCopy[voiceState].detail)}</p></div></div>
+      <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : isRecording ? "Listening" : voiceCopy[voiceState].label}</strong>{voiceDetail && <p>{voiceDetail}</p>}</div></div>
       <div className="voice-instruction"><span>{learnerCanAnswer ? "Your turn — hold the button or press and hold Space, then speak" : isPreparing ? "Reading the question and preparing your tutor…" : voiceState === "speaking" ? "Listen to the tutor, then it will be your turn" : "The tutor is getting the next question ready"}</span></div>
       <button
         className={`mic-button ${isRecording ? "mic-on" : ""}`}
