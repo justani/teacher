@@ -9,6 +9,9 @@
  */
 
 import type * as tasks from "../tasks.js";
+import type * as tutorActions from "../tutorActions.js";
+import type * as tutorPrompt from "../tutorPrompt.js";
+import type * as tutorSessions from "../tutorSessions.js";
 
 import type {
   ApiFromModules,
@@ -18,6 +21,9 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   tasks: typeof tasks;
+  tutorActions: typeof tutorActions;
+  tutorPrompt: typeof tutorPrompt;
+  tutorSessions: typeof tutorSessions;
 }>;
 
 /**
@@ -46,4 +52,6 @@ export declare const internal: FilterApi<
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {};
+export declare const components: {
+  agent: import("@convex-dev/agent/_generated/component.js").ComponentApi<"agent">;
+};

@@ -30,6 +30,12 @@ import type { DataModel } from "./dataModel.js";
 type Env = {
   readonly CONVEX_CLOUD_URL: string;
   readonly CONVEX_SITE_URL: string;
+  readonly GEMINI_TEXT_MODEL: string | undefined;
+  readonly GOOGLE_CLIENT_EMAIL: string | undefined;
+  readonly GOOGLE_CLOUD_LOCATION: string | undefined;
+  readonly GOOGLE_CLOUD_PROJECT: string | undefined;
+  readonly GOOGLE_PRIVATE_KEY: string | undefined;
+  readonly SARVAM_API_KEY: string | undefined;
 };
 
 /**

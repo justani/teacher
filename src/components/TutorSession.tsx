@@ -9,12 +9,22 @@ import {
   type ChangeEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { useAction, useMutation, useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
+import { playTutorSpeech } from "@/lib/tutorAudio";
 
 type VoiceState = "listening" | "thinking" | "speaking";
 type SessionState = "ready" | "active" | "ended";
 type IntakeState = "upload" | "crop" | "confirmed";
 type CropSelection = { x: number; y: number; width: number; height: number };
 type CropMode = "move" | "nw" | "ne" | "sw" | "se";
+type TranscriptTurn = {
+  _id: Id<"tutorTurns">;
+  _creationTime: number;
+  speaker: "learner" | "tutor";
+  text: string;
+};
 
 const DEFAULT_CROP: CropSelection = { x: 8, y: 18, width: 84, height: 38 };
 
@@ -47,16 +57,7 @@ function Icon({ name }: { name: "upload" | "mic" | "stop" | "play" | "image" | "
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
 
-function TranscriptPanel({ voiceState }: { voiceState: VoiceState }) {
-  const transcript = [
-    { speaker: "Tutor", time: "00:12", text: "Okay, what is the question asking us to do?" },
-    { speaker: "Tanusha", time: "00:18", text: "Find the area of a sector of a circle." },
-    { speaker: "Tutor", time: "00:25", text: "Do you know how to find the area?" },
-    { speaker: "Tanusha", time: "00:34", text: "I think it is 2πr multiplied by θ divided by 360." },
-    { speaker: "Tutor", time: "00:40", text: "That formula finds a length. What should we use for area?" },
-    { speaker: "Tanusha", time: "00:52", text: "πr² multiplied by θ divided by 360." },
-  ];
-
+function TranscriptPanel({ voiceState, turns }: { voiceState: VoiceState; turns: TranscriptTurn[] }) {
   return (
     <aside className="transcript-panel" aria-labelledby="transcript-heading">
       <div className="transcript-heading">
@@ -64,12 +65,13 @@ function TranscriptPanel({ voiceState }: { voiceState: VoiceState }) {
         <span className="transcript-live"><span aria-hidden="true" /> Live</span>
       </div>
       <ol className="transcript-list">
-        {transcript.map((entry) => (
-          <li key={`${entry.time}-${entry.speaker}`} className={entry.speaker === "Tutor" ? "tutor-line" : "learner-line"}>
-            <div><strong>{entry.speaker}</strong><time>{entry.time}</time></div>
+        {turns.map((entry) => (
+          <li key={entry._id} className={entry.speaker === "tutor" ? "tutor-line" : "learner-line"}>
+            <div><strong>{entry.speaker === "tutor" ? "Tutor" : "Tanusha"}</strong><time>{new Date(entry._creationTime).toLocaleTimeString([], { minute: "2-digit", second: "2-digit" })}</time></div>
             <p>{entry.text}</p>
           </li>
         ))}
+        {turns.length === 0 && <li className="transcript-empty"><p>The conversation will appear here when the tutor is ready.</p></li>}
         <li className="transcript-current" aria-live="polite">
           <div><strong>Tutor</strong><span>{voiceCopy[voiceState].label}</span></div>
           <p>{voiceCopy[voiceState].detail}</p>
@@ -84,12 +86,14 @@ export function TutorSession() {
   const [sessionState, setSessionState] = useState<SessionState>("ready");
   const [intakeState, setIntakeState] = useState<IntakeState>("upload");
   const [voiceState, setVoiceState] = useState<VoiceState>("listening");
-  const [isMicOn, setIsMicOn] = useState(true);
+  const [isRecording, setIsRecording] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(15 * 60);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
   const [crop, setCrop] = useState<CropSelection>(DEFAULT_CROP);
+  const [sessionId, setSessionId] = useState<Id<"tutorSessions"> | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cropSurfaceRef = useRef<HTMLDivElement>(null);
   const sourceImageRef = useRef<HTMLImageElement>(null);
@@ -99,6 +103,23 @@ export function TutorSession() {
     startY: number;
     initial: CropSelection;
   } | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimeoutRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const talkPressActiveRef = useRef(false);
+
+  const generateUploadUrl = useMutation(api.tutorSessions.generateUploadUrl);
+  const createTutorSession = useMutation(api.tutorSessions.create);
+  const finishPlayback = useMutation(api.tutorSessions.finishPlayback);
+  const endTutorSession = useMutation(api.tutorSessions.end);
+  const prepareTutor = useAction(api.tutorActions.prepare);
+  const respondToAudio = useAction(api.tutorActions.respondToAudio);
+  const learnerView = useQuery(
+    api.tutorSessions.getLearnerView,
+    sessionId ? { sessionId } : "skip",
+  );
 
   useEffect(() => {
     if (sessionState !== "active" || secondsRemaining <= 0) return;
@@ -110,6 +131,12 @@ export function TutorSession() {
     if (sourceUrl) URL.revokeObjectURL(sourceUrl);
   }, [sourceUrl]);
 
+  useEffect(() => () => {
+    recorderStreamRef.current?.getTracks().forEach((track) => track.stop());
+    if (recordingTimeoutRef.current) window.clearTimeout(recordingTimeoutRef.current);
+    void audioContextRef.current?.close();
+  }, []);
+
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -120,6 +147,8 @@ export function TutorSession() {
     setCrop(DEFAULT_CROP);
     setIntakeState("crop");
     setSessionState("ready");
+    setSessionId(null);
+    setErrorMessage("");
     setSecondsRemaining(15 * 60);
     event.target.value = "";
   }
@@ -179,12 +208,140 @@ export function TutorSession() {
     setIntakeState("confirmed");
   }
 
-  function startSession() {
-    if (intakeState !== "confirmed") return;
-    setSessionState("active");
+  function getAudioContext() {
+    if (!audioContextRef.current || audioContextRef.current.state === "closed") {
+      audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+    }
+    return audioContextRef.current;
+  }
+
+  async function uploadBlob(blob: Blob) {
+    const uploadUrl = await generateUploadUrl();
+    const upload = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": blob.type || "application/octet-stream" },
+      body: blob,
+    });
+    if (!upload.ok) throw new Error("The file could not be uploaded.");
+    const result: unknown = await upload.json();
+    if (
+      typeof result !== "object" ||
+      result === null ||
+      !("storageId" in result) ||
+      typeof result.storageId !== "string"
+    ) {
+      throw new Error("The upload returned an invalid response.");
+    }
+    return result.storageId as Id<"_storage">;
+  }
+
+  async function speak(text: string, activeSessionId: Id<"tutorSessions">) {
+    setVoiceState("speaking");
+    await playTutorSpeech(getAudioContext(), text);
+    await finishPlayback({ sessionId: activeSessionId });
     setVoiceState("listening");
-    setIsMicOn(true);
+  }
+
+  async function startSession() {
+    if (intakeState !== "confirmed" || !croppedUrl || sessionState === "active") return;
+    setErrorMessage("");
+    setSessionState("active");
+    setVoiceState("thinking");
     if (secondsRemaining === 0) setSecondsRemaining(15 * 60);
+
+    try {
+      await getAudioContext().resume();
+      const imageBlob = await fetch(croppedUrl).then((response) => response.blob());
+      const problemImageId = await uploadBlob(imageBlob);
+      const newSessionId = await createTutorSession({
+        problemImageId,
+        sourceFileName: fileName || "problem.jpg",
+      });
+      setSessionId(newSessionId);
+      const prepared = await prepareTutor({ sessionId: newSessionId });
+      await speak(prepared.tutorReply, newSessionId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "The tutor could not start.");
+      setVoiceState("listening");
+      setSessionState("ready");
+      setSessionId(null);
+    }
+  }
+
+  async function submitRecording(blob: Blob) {
+    if (!sessionId) return;
+    setErrorMessage("");
+    setVoiceState("thinking");
+    try {
+      const audioStorageId = await uploadBlob(blob);
+      const result = await respondToAudio({ sessionId, audioStorageId });
+      await speak(result.tutorReply, sessionId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "I could not process that answer.");
+      setVoiceState("listening");
+    }
+  }
+
+  async function startRecording() {
+    if (!sessionId || sessionState !== "active" || voiceState !== "listening" || isRecording) return;
+    setErrorMessage("");
+    try {
+      await getAudioContext().resume();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+      const preferredType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
+        .find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = preferredType
+        ? new MediaRecorder(stream, { mimeType: preferredType })
+        : new MediaRecorder(stream);
+      recorderStreamRef.current = stream;
+      recorderRef.current = recorder;
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recorderStreamRef.current = null;
+        setIsRecording(false);
+        const audio = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || preferredType || "application/octet-stream",
+        });
+        audioChunksRef.current = [];
+        if (audio.size > 0) void submitRecording(audio);
+      };
+      recorder.start(250);
+      setIsRecording(true);
+      if (!talkPressActiveRef.current) {
+        recorder.stop();
+        return;
+      }
+      recordingTimeoutRef.current = window.setTimeout(() => stopRecording(), 30_000);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Microphone access was not available.");
+      setIsRecording(false);
+    }
+  }
+
+  function stopRecording() {
+    talkPressActiveRef.current = false;
+    if (recordingTimeoutRef.current) {
+      window.clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  }
+
+  function beginTalkPress() {
+    talkPressActiveRef.current = true;
+    void startRecording();
+  }
+
+  async function endSession() {
+    stopRecording();
+    if (sessionId) await endTutorSession({ sessionId }).catch(() => undefined);
+    setSessionState("ended");
   }
 
   const minutes = Math.floor(secondsRemaining / 60).toString().padStart(2, "0");
@@ -196,7 +353,7 @@ export function TutorSession() {
         <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">∠</span><div><span className="brand-name">Axiom</span><span className="brand-context">Personal maths session</span></div></div>
         <div className="session-clock" aria-label={`${minutes} minutes and ${seconds} seconds remaining`}><span className="clock-label">Session time</span><strong>{minutes}:{seconds}</strong></div>
         <div className="header-actions">
-          {sessionState !== "active" ? <button className="button button-primary" type="button" onClick={startSession} disabled={intakeState !== "confirmed"}><Icon name="play" />{sessionState === "ended" ? "Start again" : "Start session"}</button> : <button className="button button-quiet button-danger" type="button" onClick={() => { setSessionState("ended"); setIsMicOn(false); }}><Icon name="stop" />End session</button>}
+          {sessionState !== "active" ? <button className="button button-primary" type="button" onClick={() => void startSession()} disabled={intakeState !== "confirmed"}><Icon name="play" />{sessionState === "ended" ? "Start again" : "Start session"}</button> : <button className="button button-quiet button-danger" type="button" onClick={() => void endSession()}><Icon name="stop" />End session</button>}
         </div>
       </header>
 
@@ -267,7 +424,14 @@ export function TutorSession() {
                   <button type="button" onClick={() => fileInputRef.current?.click()}><Icon name="upload" />Change photo</button>
                 </div>
               </div>
-              <div className="cropped-problem-image"><img src={croppedUrl} alt="Confirmed cropped maths problem" /></div>
+              {learnerView?.problemText ? (
+                <div className="extracted-problem-text">
+                  <span>Extracted question</span>
+                  <p>{learnerView.problemText}</p>
+                </div>
+              ) : (
+                <div className="cropped-problem-image"><img src={croppedUrl} alt="Confirmed cropped maths problem" /></div>
+              )}
               <span className="source-file">{fileName}</span>
             </section>
 
@@ -281,14 +445,23 @@ export function TutorSession() {
               </div>
             </section>
           </div>
-          <TranscriptPanel voiceState={voiceState} />
+          <TranscriptPanel voiceState={voiceState} turns={learnerView?.turns ?? []} />
         </div>
       ) : null}
 
       <section className={`voice-dock voice-${voiceState} ${intakeState !== "confirmed" ? "intake-open" : ""}`} aria-label="Tutor voice controls">
-        <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : voiceCopy[voiceState].label}</strong><p>{sessionState === "ended" ? "Your board is still here when you’re ready to begin again." : voiceCopy[voiceState].detail}</p></div></div>
-        <div className="state-preview" aria-label="Preview tutor voice state"><span>Preview state</span>{(["listening", "thinking", "speaking"] as VoiceState[]).map((state) => <button key={state} type="button" className={voiceState === state ? "active" : ""} onClick={() => setVoiceState(state)} aria-pressed={voiceState === state}>{voiceCopy[state].label}</button>)}</div>
-        <button className={`mic-button ${isMicOn ? "mic-on" : ""}`} type="button" onClick={() => setIsMicOn((value) => !value)} disabled={sessionState === "ended"} aria-pressed={isMicOn}><Icon name="mic" /><span>{isMicOn ? "Mic on" : "Mic off"}</span></button>
+        <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : isRecording ? "Listening" : voiceCopy[voiceState].label}</strong><p>{sessionState === "ended" ? "Your question and transcript are still here." : errorMessage || (isRecording ? "Keep holding while you answer." : voiceCopy[voiceState].detail)}</p></div></div>
+        <div className="voice-instruction"><span>{sessionState === "active" && sessionId ? "Hold the button while you speak" : "Start the session after confirming your crop"}</span></div>
+        <button
+          className={`mic-button ${isRecording ? "mic-on" : ""}`}
+          type="button"
+          onPointerDown={beginTalkPress}
+          onPointerUp={stopRecording}
+          onPointerCancel={stopRecording}
+          onPointerLeave={() => { if (isRecording) stopRecording(); }}
+          disabled={sessionState !== "active" || !sessionId || voiceState !== "listening"}
+          aria-pressed={isRecording}
+        ><Icon name="mic" /><span>{isRecording ? "Release to send" : "Hold to talk"}</span></button>
       </section>
     </main>
   );

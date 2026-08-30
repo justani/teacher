@@ -1,0 +1,275 @@
+"use node";
+
+import { Agent } from "@convex-dev/agent";
+import { createVertex } from "@ai-sdk/google-vertex";
+import { generateObject } from "ai";
+import { ConvexError, v } from "convex/values";
+import { z } from "zod";
+import { components, internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
+import { action, env } from "./_generated/server";
+import {
+  buildOpeningPrompt,
+  buildTurnPrompt,
+  cleanTutorReply,
+  TUTOR_SYSTEM_PROMPT,
+} from "./tutorPrompt";
+
+const preparationSchema = z.object({
+  problemText: z.string().min(3).max(1200),
+  confidence: z.enum(["high", "medium", "low"]),
+  clarificationNeeded: z.string().min(1).max(240).optional(),
+  exactAnswer: z.string().min(1).max(160),
+  approximateAnswer: z.string().min(1).max(160).optional(),
+  units: z.string().min(1).max(60).optional(),
+  mainConcept: z.string().min(1).max(240),
+  prerequisites: z.array(z.string().min(1).max(180)).max(5),
+  completeSolution: z.array(z.string().min(1).max(300)).min(1).max(10),
+  checkpoints: z.array(z.string().min(1).max(220)).min(1).max(8),
+  likelyMisconceptions: z.array(z.string().min(1).max(220)).max(8),
+  teachingMoves: z
+    .array(
+      z.object({
+        level: z.enum(["redirect", "hint", "prerequisite", "explain"]),
+        prompt: z.string().min(1).max(240),
+      }),
+    )
+    .min(2)
+    .max(12),
+  transferProblem: z.string().min(1).max(500),
+  transferAnswer: z.string().min(1).max(200),
+});
+
+function requiredEnv(name: string, value: string | undefined) {
+  if (!value) throw new ConvexError(`${name} is not configured on the server.`);
+  return value;
+}
+
+function createGeminiProvider() {
+  return {
+    provider: createVertex({
+      project: requiredEnv("GOOGLE_CLOUD_PROJECT", env.GOOGLE_CLOUD_PROJECT),
+      location: env.GOOGLE_CLOUD_LOCATION ?? "global",
+      googleAuthOptions: {
+        credentials: {
+          client_email: requiredEnv("GOOGLE_CLIENT_EMAIL", env.GOOGLE_CLIENT_EMAIL),
+          private_key: requiredEnv("GOOGLE_PRIVATE_KEY", env.GOOGLE_PRIVATE_KEY).replace(
+            /\\n/g,
+            "\n",
+          ),
+        },
+      },
+    }),
+    model: env.GEMINI_TEXT_MODEL ?? "gemini-3.7-flash",
+  };
+}
+
+function createTutorAgent() {
+  const { provider, model } = createGeminiProvider();
+  return new Agent(components.agent, {
+    name: "Axiom maths tutor",
+    languageModel: provider(model),
+    instructions: TUTOR_SYSTEM_PROMPT,
+    storageOptions: { saveMessages: "all" },
+  });
+}
+
+function safeProviderMessage(error: unknown) {
+  if (error instanceof ConvexError) return error.message;
+  return "The AI service could not complete that request. Please try again.";
+}
+
+export const prepare = action({
+  args: { sessionId: v.id("tutorSessions") },
+  returns: v.object({ problemText: v.string(), tutorReply: v.string() }),
+  handler: async (ctx, args): Promise<{ problemText: string; tutorReply: string }> => {
+    const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
+      internal.tutorSessions.getInternal,
+      args,
+    );
+    if (!session) throw new ConvexError("Session not found.");
+
+    try {
+      const image: Blob | null = await ctx.storage.get(session.problemImageId);
+      if (!image) throw new ConvexError("The cropped image is no longer available.");
+      if (image.size > 8 * 1024 * 1024) {
+        throw new ConvexError("Please crop a smaller image under 8 MB.");
+      }
+
+      const { provider, model } = createGeminiProvider();
+      const { object: preparation }: { object: z.infer<typeof preparationSchema> } = await generateObject({
+        model: provider(model),
+        schema: preparationSchema,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `Read the single school maths problem in this cropped image and privately prepare a tutor to teach it Socratically.
+
+Transcribe the complete problem faithfully, including labels, symbols, units, and any diagram information needed to solve it. Compute and verify the answer yourself. Build a solution map and flexible teaching moves, not a dialogue script.
+
+If the image is ambiguous or incomplete, set confidence to low and explain exactly what clarification is needed. Do not invent missing numbers or diagram labels. Keep arrays compact and ordered from least help to most help.`,
+              },
+              {
+                type: "image",
+                image: new Uint8Array(await image.arrayBuffer()),
+                mediaType: image.type || "image/jpeg",
+              },
+            ],
+          },
+        ],
+      });
+
+      if (preparation.confidence === "low" || preparation.clarificationNeeded) {
+        const clarification =
+          preparation.clarificationNeeded ?? "I cannot read the complete problem confidently. Please adjust the crop or use a clearer photo.";
+        await ctx.runMutation(internal.tutorSessions.markStatus, {
+          sessionId: args.sessionId,
+          status: "error",
+          errorMessage: clarification,
+        });
+        throw new ConvexError(clarification);
+      }
+
+      await ctx.runMutation(internal.tutorSessions.savePreparation, {
+        sessionId: args.sessionId,
+        preparation,
+      });
+
+      const generated = await createTutorAgent().generateText(
+        ctx,
+        { threadId: session.agentThreadId },
+        { prompt: buildOpeningPrompt(preparation), maxOutputTokens: 120 },
+      );
+      const tutorReply = cleanTutorReply(generated.text);
+      await ctx.runMutation(internal.tutorSessions.saveTurn, {
+        sessionId: args.sessionId,
+        speaker: "tutor",
+        text: tutorReply,
+        nextStatus: "speaking",
+      });
+
+      return { problemText: preparation.problemText, tutorReply };
+    } catch (error) {
+      const message = safeProviderMessage(error);
+      await ctx.runMutation(internal.tutorSessions.markStatus, {
+        sessionId: args.sessionId,
+        status: "error",
+        errorMessage: message,
+      });
+      throw new ConvexError(message);
+    } finally {
+      await ctx.runMutation(internal.tutorSessions.deleteStorageObject, {
+        storageId: session.problemImageId,
+      });
+    }
+  },
+});
+
+export const respondToAudio = action({
+  args: {
+    sessionId: v.id("tutorSessions"),
+    audioStorageId: v.id("_storage"),
+  },
+  returns: v.object({ transcript: v.string(), tutorReply: v.string() }),
+  handler: async (ctx, args): Promise<{ transcript: string; tutorReply: string }> => {
+    const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
+      internal.tutorSessions.getInternal,
+      {
+      sessionId: args.sessionId,
+      },
+    );
+    if (!session?.preparation) throw new ConvexError("The tutor is not ready yet.");
+
+    await ctx.runMutation(internal.tutorSessions.markStatus, {
+      sessionId: args.sessionId,
+      status: "thinking",
+    });
+
+    try {
+      const audio = await ctx.storage.get(args.audioStorageId);
+      if (!audio) throw new ConvexError("The recording is no longer available.");
+      if (audio.size > 8 * 1024 * 1024) {
+        throw new ConvexError("Please keep each answer under 30 seconds.");
+      }
+
+      const form = new FormData();
+      form.append("file", audio, "learner-answer.webm");
+      form.append("model", "saaras:v3");
+      form.append("mode", "transcribe");
+      form.append("language_code", "unknown");
+
+      const sttResponse = await fetch("https://api.sarvam.ai/speech-to-text", {
+        method: "POST",
+        headers: {
+          "api-subscription-key": requiredEnv("SARVAM_API_KEY", env.SARVAM_API_KEY),
+        },
+        body: form,
+      });
+
+      if (!sttResponse.ok) {
+        const retryable = [429, 500, 503].includes(sttResponse.status);
+        throw new ConvexError(
+          retryable
+            ? "Speech recognition is temporarily busy. Please try that answer once more."
+            : "I could not transcribe that recording. Please check the microphone and try again.",
+        );
+      }
+
+      const body: unknown = await sttResponse.json();
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        !("transcript" in body) ||
+        typeof body.transcript !== "string"
+      ) {
+        throw new ConvexError("Speech recognition returned an invalid response.");
+      }
+
+      const transcript = body.transcript.trim();
+      if (!transcript) {
+        throw new ConvexError("I could not hear an answer. Hold the button and try again.");
+      }
+
+      await ctx.runMutation(internal.tutorSessions.saveTurn, {
+        sessionId: args.sessionId,
+        speaker: "learner",
+        text: transcript,
+        nextStatus: "thinking",
+      });
+
+      const generated = await createTutorAgent().generateText(
+        ctx,
+        { threadId: session.agentThreadId },
+        {
+          prompt: buildTurnPrompt(session.preparation, transcript),
+          maxOutputTokens: 140,
+        },
+      );
+      const tutorReply = cleanTutorReply(generated.text);
+
+      await ctx.runMutation(internal.tutorSessions.saveTurn, {
+        sessionId: args.sessionId,
+        speaker: "tutor",
+        text: tutorReply,
+        nextStatus: "speaking",
+      });
+
+      return { transcript, tutorReply };
+    } catch (error) {
+      const message = safeProviderMessage(error);
+      await ctx.runMutation(internal.tutorSessions.markStatus, {
+        sessionId: args.sessionId,
+        status: "error",
+        errorMessage: message,
+      });
+      throw new ConvexError(message);
+    } finally {
+      await ctx.runMutation(internal.tutorSessions.deleteStorageObject, {
+        storageId: args.audioStorageId,
+      });
+    }
+  },
+});
