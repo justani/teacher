@@ -152,6 +152,7 @@ export function TutorSession() {
   const endTutorSession = useMutation(api.tutorSessions.end);
   const prepareTutor = useAction(api.tutorActions.prepare);
   const respondToAudio = useAction(api.tutorActions.respondToAudio);
+  const generateDrawing = useAction(api.tutorActions.generateDrawing);
   const learnerView = useQuery(
     api.tutorSessions.getLearnerView,
     sessionId ? { sessionId } : "skip",
@@ -277,6 +278,7 @@ export function TutorSession() {
     chunks: Array<{ say: string; actions: BoardAction[] }>,
     activeSessionId: Id<"tutorSessions">,
     timing?: ResponseTiming,
+    completeTurn = true,
   ) {
     setVoiceState("speaking");
     let tutorUsedBoard = false;
@@ -365,9 +367,39 @@ export function TutorSession() {
         }
       }
     } finally {
-      await finishPlayback({ sessionId: activeSessionId }).catch(() => undefined);
-      setVoiceState("listening");
+      if (completeTurn) {
+        await finishPlayback({ sessionId: activeSessionId }).catch(() => undefined);
+        setVoiceState("listening");
+      }
     }
+  }
+
+  async function drawTutorTurn(
+    activeSessionId: Id<"tutorSessions">,
+    boardImageId: Id<"_storage"> | undefined,
+    boardSummary: string,
+    speech: string,
+    drawingDirection: string,
+  ) {
+    const result = await generateDrawing({
+      sessionId: activeSessionId,
+      boardImageId,
+      boardSummary,
+      speech,
+      drawingDirection,
+    });
+    if (result.actions.length === 0) return;
+
+    boardRef.current?.applyTutorActions(result.actions);
+    const checkpoint = await boardRef.current?.captureCheckpoint();
+    if (!checkpoint) return;
+    await saveBoardCheckpoint({
+      sessionId: activeSessionId,
+      actor: "tutor",
+      revision: checkpoint.revision,
+      document: checkpoint.document,
+      summary: checkpoint.summary,
+    });
   }
 
   async function startSession(problemImageUrl = croppedUrl) {
@@ -448,7 +480,23 @@ export function TutorSession() {
         boardSummary: checkpoint.summary,
       });
       logFrontendTiming("tutor_text_ready", startedAt, { flow: "learner_turn" });
-      await speakTutorTurn(result.speechChunks, sessionId, { flow: "learner_turn", startedAt });
+      const speechPromise = speakTutorTurn(
+        result.speechChunks,
+        sessionId,
+        { flow: "learner_turn", startedAt },
+        false,
+      );
+      const drawingPromise = drawTutorTurn(
+        sessionId,
+        boardImageId,
+        checkpoint.summary,
+        result.tutorReply,
+        result.drawingDirection,
+      ).catch((error) => console.error("Could not draw tutor response", error));
+      const [speechOutcome] = await Promise.allSettled([speechPromise, drawingPromise]);
+      await finishPlayback({ sessionId }).catch(() => undefined);
+      setVoiceState("listening");
+      if (speechOutcome.status === "rejected") throw speechOutcome.reason;
     } catch (error) {
       logFrontendTiming("learner_turn_failed", startedAt, { flow: "learner_turn" });
       setErrorMessage(error instanceof Error ? error.message : "I could not process that answer.");

@@ -8,7 +8,9 @@ import { z } from "zod";
 import { components, internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { action, env } from "./_generated/server";
+import { boardAction } from "./schema";
 import {
+  buildDrawingPrompt,
   buildOpeningPrompt,
   buildTurnPrompt,
   cleanTutorReply,
@@ -101,22 +103,32 @@ const boardActionSchema = z.discriminatedUnion("type", [
 ]);
 
 const tutorTurnSchema = z.object({
-  chunks: z
-    .array(
-      z.object({
-        say: z.string().min(1).max(220),
-        actions: z.array(boardActionSchema).max(2),
-      }),
-    )
+  speech: z
+    .string()
     .min(1)
-    .max(3),
+    .max(320)
+    .describe("The complete short Hinglish reply to speak to the learner."),
+  drawingDirection: z
+    .string()
+    .max(300)
+    .describe(
+      "A plain-language direction for a separate board artist. Return an empty string when no drawing helps.",
+    ),
+});
+
+const drawingPlanSchema = z.object({
+  actions: z.array(boardActionSchema).max(2),
 });
 
 type TutorTurnPlan = z.infer<typeof tutorTurnSchema>;
-type TutorSpeechChunk = TutorTurnPlan["chunks"][number];
+type TutorSpeechChunk = {
+  say: string;
+  actions: z.infer<typeof boardActionSchema>[];
+};
 type RespondToAudioResult = {
   transcript: string;
   tutorReply: string;
+  drawingDirection: string;
   speechChunks: TutorSpeechChunk[];
 };
 
@@ -387,6 +399,7 @@ export const respondToAudio = action({
   returns: v.object({
     transcript: v.string(),
     tutorReply: v.string(),
+    drawingDirection: v.string(),
     speechChunks: v.array(
       v.object({
         say: v.string(),
@@ -413,6 +426,7 @@ export const respondToAudio = action({
     let audioLoadMs: number | undefined;
     let sttMs: number | undefined;
     let tutorGenerationMs: number | undefined;
+    let boardImageHandedOff = false;
     const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
       internal.tutorSessions.getInternal,
       {
@@ -514,21 +528,25 @@ export const respondToAudio = action({
         ? await ctx.storage.get(args.boardImageId)
         : null;
       const prompt = buildTurnPrompt(session.preparation, transcript, args.boardSummary);
+      const boardImageBytes =
+        boardImage && boardImage.size <= 5 * 1024 * 1024
+          ? new Uint8Array(await boardImage.arrayBuffer())
+          : null;
       const content: Array<
         | { type: "text"; text: string }
         | { type: "image"; image: Uint8Array; mediaType: string }
       > = [{ type: "text", text: prompt }];
-      if (boardImage && boardImage.size <= 5 * 1024 * 1024) {
+      if (boardImage && boardImageBytes) {
         content.push({
           type: "image",
-          image: new Uint8Array(await boardImage.arrayBuffer()),
+          image: boardImageBytes,
           mediaType: boardImage.type || "image/png",
         });
       }
 
       stage = "tutor_generation";
       const tutorGenerationStartedAt = Date.now();
-      let object: TutorTurnPlan;
+      let turn: TutorTurnPlan;
       try {
         const result: { object: TutorTurnPlan } = await createTutorAgent().generateObject(
           ctx,
@@ -536,18 +554,17 @@ export const respondToAudio = action({
           {
             schema: tutorTurnSchema,
             messages: [{ role: "user", content }],
-            maxOutputTokens: 360,
+            maxOutputTokens: 512,
+            reasoning: "none",
           },
         );
-        object = result.object;
+        turn = result.object;
       } finally {
         tutorGenerationMs = elapsedMs(tutorGenerationStartedAt);
       }
-      const speechChunks: TutorSpeechChunk[] = object.chunks.map((chunk) => ({
-        say: cleanTutorReply(chunk.say),
-        actions: chunk.actions,
-      }));
-      const tutorReply = cleanTutorReply(speechChunks.map((chunk) => chunk.say).join(" "));
+      const tutorReply = cleanTutorReply(turn.speech);
+      const drawingDirection = turn.drawingDirection.trim();
+      const speechChunks: TutorSpeechChunk[] = [{ say: tutorReply, actions: [] }];
 
       await ctx.runMutation(internal.tutorSessions.saveTurn, {
         sessionId: args.sessionId,
@@ -559,7 +576,15 @@ export const respondToAudio = action({
 
       outcome = "success";
       stage = "complete";
-      return { transcript, tutorReply, speechChunks };
+      if (args.boardImageId) {
+        boardImageHandedOff = true;
+        await ctx.scheduler
+          .runAfter(5 * 60 * 1000, internal.tutorSessions.deleteStorageObject, {
+            storageId: args.boardImageId,
+          })
+          .catch((error) => console.error("Could not schedule board image cleanup", error));
+      }
+      return { transcript, tutorReply, drawingDirection, speechChunks };
     } catch (error) {
       console.error("Tutor learner-turn processing failed", {
         stage,
@@ -578,7 +603,7 @@ export const respondToAudio = action({
           storageId: args.audioStorageId,
         })
         .catch((error) => console.error("Could not delete learner audio", error));
-      if (args.boardImageId) {
+      if (args.boardImageId && !boardImageHandedOff) {
         await ctx
           .runMutation(internal.tutorSessions.deleteStorageObject, {
             storageId: args.boardImageId,
@@ -597,6 +622,79 @@ export const respondToAudio = action({
           tutorGenerationMs,
         })
         .catch((error) => console.error("Could not store learner-turn latency", error));
+    }
+  },
+});
+
+export const generateDrawing = action({
+  args: {
+    sessionId: v.id("tutorSessions"),
+    boardImageId: v.optional(v.id("_storage")),
+    boardSummary: v.string(),
+    speech: v.string(),
+    drawingDirection: v.string(),
+  },
+  returns: v.object({ actions: v.array(boardAction) }),
+  handler: async (ctx, args): Promise<{ actions: z.infer<typeof boardActionSchema>[] }> => {
+    try {
+      const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
+        internal.tutorSessions.getInternal,
+        { sessionId: args.sessionId },
+      );
+      if (!session) throw new ConvexError("Session not found.");
+      if (args.boardSummary.length > 20_000) {
+        throw new ConvexError("The board summary is too large to understand safely.");
+      }
+      if (args.speech.length > 480 || args.drawingDirection.length > 300) {
+        throw new ConvexError("The drawing request is too large.");
+      }
+      if (!args.drawingDirection.trim()) return { actions: [] };
+
+      const boardImage = args.boardImageId
+        ? await ctx.storage.get(args.boardImageId)
+        : null;
+      const content: Array<
+        | { type: "text"; text: string }
+        | { type: "image"; image: Uint8Array; mediaType: string }
+      > = [
+        {
+          type: "text",
+          text: buildDrawingPrompt(
+            args.drawingDirection,
+            args.boardSummary,
+            args.speech,
+          ),
+        },
+      ];
+      if (boardImage && boardImage.size <= 5 * 1024 * 1024) {
+        content.push({
+          type: "image",
+          image: new Uint8Array(await boardImage.arrayBuffer()),
+          mediaType: boardImage.type || "image/png",
+        });
+      }
+
+      const { provider, model } = createGeminiProvider();
+      const result: { object: z.infer<typeof drawingPlanSchema> } = await generateObject({
+        model: provider(model),
+        schema: drawingPlanSchema,
+        messages: [{ role: "user", content }],
+        maxOutputTokens: 512,
+      });
+      return result.object;
+    } catch (error) {
+      console.warn("Tutor drawing generation failed; continuing with speech", {
+        ...providerErrorMetadata(error),
+      });
+      return { actions: [] };
+    } finally {
+      if (args.boardImageId) {
+        await ctx
+          .runMutation(internal.tutorSessions.deleteStorageObject, {
+            storageId: args.boardImageId,
+          })
+          .catch((error) => console.error("Could not delete board image", error));
+      }
     }
   },
 });
