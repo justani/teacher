@@ -767,7 +767,8 @@ export const generateDrawing = action({
       let generated = await generateText({
         model: provider(model),
         messages: [{ role: "user", content }],
-        maxOutputTokens: 256,
+        maxOutputTokens: 1024,
+        reasoning: "none",
       });
       let actions = parseDrawingProtocol(generated.text);
 
@@ -790,7 +791,8 @@ export const generateDrawing = action({
               ],
             },
           ],
-          maxOutputTokens: 256,
+          maxOutputTokens: 1024,
+          reasoning: "none",
         });
         actions = parseDrawingProtocol(generated.text);
       }
