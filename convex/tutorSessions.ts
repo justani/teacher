@@ -2,7 +2,7 @@ import { createThread } from "@convex-dev/agent";
 import { v } from "convex/values";
 import { components } from "./_generated/api";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
-import { privatePreparation, sessionStatus } from "./schema";
+import schema, { privatePreparation, sessionStatus, tutorSpeechChunk } from "./schema";
 
 export const generateUploadUrl = mutation({
   args: {},
@@ -39,12 +39,15 @@ export const getLearnerView = query({
       status: sessionStatus,
       problemText: v.optional(v.string()),
       errorMessage: v.optional(v.string()),
+      latestBoardDocument: v.optional(v.string()),
+      boardRevision: v.optional(v.number()),
       turns: v.array(
         v.object({
           _id: v.id("tutorTurns"),
           _creationTime: v.number(),
           speaker: v.union(v.literal("learner"), v.literal("tutor")),
           text: v.string(),
+          speechChunks: v.optional(v.array(tutorSpeechChunk)),
         }),
       ),
     }),
@@ -63,11 +66,14 @@ export const getLearnerView = query({
       status: session.status,
       problemText: session.problemText,
       errorMessage: session.errorMessage,
-      turns: turns.map(({ _id, _creationTime, speaker, text }) => ({
+      latestBoardDocument: session.latestBoardDocument,
+      boardRevision: session.boardRevision,
+      turns: turns.map(({ _id, _creationTime, speaker, text, speechChunks }) => ({
         _id,
         _creationTime,
         speaker,
         text,
+        speechChunks,
       })),
     };
   },
@@ -75,7 +81,41 @@ export const getLearnerView = query({
 
 export const getInternal = internalQuery({
   args: { sessionId: v.id("tutorSessions") },
+  returns: v.union(v.null(), schema.doc("tutorSessions")),
   handler: async (ctx, args) => ctx.db.get("tutorSessions", args.sessionId),
+});
+
+export const saveBoardCheckpoint = mutation({
+  args: {
+    sessionId: v.id("tutorSessions"),
+    actor: v.union(v.literal("learner"), v.literal("tutor")),
+    revision: v.number(),
+    document: v.string(),
+    summary: v.string(),
+  },
+  returns: v.id("boardCheckpoints"),
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get("tutorSessions", args.sessionId);
+    if (!session) throw new Error("Session not found.");
+    if (args.document.length > 450_000) throw new Error("The board is too large to save.");
+    if (args.summary.length > 20_000) throw new Error("The board summary is too large to save.");
+    if ((session.boardRevision ?? -1) >= args.revision) {
+      throw new Error("This board checkpoint is older than the saved board.");
+    }
+
+    const checkpointId = await ctx.db.insert("boardCheckpoints", {
+      sessionId: args.sessionId,
+      actor: args.actor,
+      revision: args.revision,
+      document: args.document,
+      summary: args.summary,
+    });
+    await ctx.db.patch("tutorSessions", args.sessionId, {
+      latestBoardDocument: args.document,
+      boardRevision: args.revision,
+    });
+    return checkpointId;
+  },
 });
 
 export const markStatus = internalMutation({
@@ -121,6 +161,7 @@ export const saveTurn = internalMutation({
     speaker: v.union(v.literal("learner"), v.literal("tutor")),
     text: v.string(),
     nextStatus: sessionStatus,
+    speechChunks: v.optional(v.array(tutorSpeechChunk)),
   },
   returns: v.id("tutorTurns"),
   handler: async (ctx, args) => {
@@ -130,6 +171,7 @@ export const saveTurn = internalMutation({
       sessionId: args.sessionId,
       speaker: args.speaker,
       text: args.text,
+      speechChunks: args.speechChunks,
     });
     await ctx.db.patch("tutorSessions", args.sessionId, {
       status: args.nextStatus,

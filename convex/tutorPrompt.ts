@@ -30,14 +30,22 @@ export function buildOpeningPrompt(preparation: Preparation) {
 Begin the session now. Ask the smallest useful opening question about what the problem is asking. Do not mention the answer or the private preparation.`;
 }
 
-export function buildTurnPrompt(preparation: Preparation, transcript: string) {
+export function buildTurnPrompt(
+  preparation: Preparation,
+  transcript: string,
+  boardSummary?: string,
+) {
   return `${privateReference(preparation)}
 
 <latest_learner_transcript>
 ${transcript}
 </latest_learner_transcript>
 
-Respond with the smallest useful next tutoring move. Ask at most one question. Do not mention the private preparation.`;
+<current_board>
+${boardSummary || "The learner has not added anything to the board yet."}
+</current_board>
+
+Respond with the smallest useful next tutoring move. Ask at most one question. Use at most two small board actions, and only when a visual mark makes the next move clearer. Board-action coordinates are normalized from 0 to 1 across the learner's visible board: x increases left to right and y increases top to bottom. Prefer an open area and never cover the learner's work. Do not complete the learner's work or mention the private preparation.`;
 }
 
 function privateReference(preparation: Preparation) {

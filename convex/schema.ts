@@ -44,7 +44,42 @@ export const privatePreparation = v.object({
   transferAnswer: v.string(),
 });
 
-export default defineSchema({
+export const boardAction = v.union(
+  v.object({
+    type: v.literal("addText"),
+    text: v.string(),
+    x: v.number(),
+    y: v.number(),
+  }),
+  v.object({
+    type: v.literal("addArrow"),
+    startX: v.number(),
+    startY: v.number(),
+    endX: v.number(),
+    endY: v.number(),
+  }),
+  v.object({
+    type: v.literal("highlight"),
+    x: v.number(),
+    y: v.number(),
+    width: v.number(),
+    height: v.number(),
+  }),
+  v.object({
+    type: v.literal("crossOut"),
+    startX: v.number(),
+    startY: v.number(),
+    endX: v.number(),
+    endY: v.number(),
+  }),
+);
+
+export const tutorSpeechChunk = v.object({
+  say: v.string(),
+  actions: v.array(boardAction),
+});
+
+const schema = defineSchema({
   tasks: defineTable({
     title: v.string(),
     completed: v.boolean(),
@@ -57,10 +92,22 @@ export default defineSchema({
     preparation: v.optional(privatePreparation),
     agentThreadId: v.string(),
     errorMessage: v.optional(v.string()),
+    latestBoardDocument: v.optional(v.string()),
+    boardRevision: v.optional(v.number()),
   }),
   tutorTurns: defineTable({
     sessionId: v.id("tutorSessions"),
     speaker: v.union(v.literal("learner"), v.literal("tutor")),
     text: v.string(),
+    speechChunks: v.optional(v.array(tutorSpeechChunk)),
+  }).index("by_sessionId", ["sessionId"]),
+  boardCheckpoints: defineTable({
+    sessionId: v.id("tutorSessions"),
+    actor: v.union(v.literal("learner"), v.literal("tutor")),
+    revision: v.number(),
+    document: v.string(),
+    summary: v.string(),
   }).index("by_sessionId", ["sessionId"]),
 });
+
+export default schema;

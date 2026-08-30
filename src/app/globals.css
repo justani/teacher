@@ -168,6 +168,28 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(40, 90, 74, 
 .fraction span:last-child { padding-top: 2px; }
 .next-line { margin-top: 17px; padding-bottom: 10px; border-bottom: 1px dashed rgba(32, 40, 37, .2); color: var(--graphite-faint); font-family: Georgia, serif; font-size: 16px; font-style: italic; }
 
+.math-board { display: grid; min-height: 560px; margin-top: 18px; overflow: hidden; grid-template-rows: auto 1fr; border: 1px solid rgba(48, 66, 59, .16); border-radius: 16px; background: #fffef9; box-shadow: 0 14px 38px rgba(31, 39, 35, .07); }
+.math-board-toolbar { display: flex; min-height: 52px; align-items: center; gap: 8px; padding: 7px 9px; border-bottom: 1px solid var(--rule); background: rgba(247, 245, 237, .96); }
+.board-tools-primary { display: flex; align-items: center; gap: 3px; padding: 3px; border-radius: 11px; background: rgba(37, 62, 52, .06); }
+.math-board-toolbar button { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 8px; color: var(--graphite-soft); background: transparent; font-size: 11px; font-weight: 800; cursor: pointer; }
+.math-board-toolbar button > span { font-size: 17px; font-weight: 500; line-height: 1; }
+.math-board-toolbar button:hover:not(:disabled) { color: var(--pine); background: rgba(255, 255, 255, .75); }
+.math-board-toolbar button.active { color: white; background: var(--pine); box-shadow: 0 3px 9px rgba(40, 90, 74, .18); }
+.math-board-toolbar button:disabled { opacity: .38; cursor: not-allowed; }
+.math-board-toolbar .board-undo { margin-left: 2px; }
+.board-turn-pill { display: inline-flex; min-height: 30px; align-items: center; gap: 7px; margin-left: auto; padding: 0 10px; border-radius: 999px; color: var(--graphite-soft); background: var(--control); font-size: 10px; font-weight: 800; white-space: nowrap; }
+.board-turn-pill > span { width: 7px; height: 7px; border-radius: 50%; background: var(--terracotta); box-shadow: 0 0 0 3px var(--terracotta-wash); }
+.board-turn-pill.learner-turn { color: var(--pine); background: var(--pine-wash); }
+.board-turn-pill.learner-turn > span { background: var(--pine); box-shadow: 0 0 0 3px rgba(40, 90, 74, .1); }
+.math-board-canvas { position: relative; min-height: 505px; overflow: hidden; background: repeating-linear-gradient(to bottom, transparent 0, transparent 31px, rgba(50, 96, 119, .065) 32px), #fffef9; }
+.math-board-canvas .tl-container { position: absolute; inset: 0; background: transparent; }
+.math-board-canvas .tl-background { background-color: transparent; }
+.board-empty-hint { position: absolute; top: 50%; left: 50%; z-index: 2; width: min(360px, calc(100% - 48px)); padding: 22px; color: var(--graphite-faint); text-align: center; pointer-events: none; transform: translate(-50%, -50%); }
+.board-empty-hint::before { display: block; width: 54px; height: 54px; margin: 0 auto 14px; border: 1px dashed rgba(40, 90, 74, .32); border-radius: 50%; color: var(--pine); content: "✎"; font-family: Georgia, serif; font-size: 27px; line-height: 54px; }
+.board-empty-hint span { color: var(--graphite-soft); font-family: Georgia, "Times New Roman", serif; font-size: 20px; }
+.board-empty-hint p { margin: 7px 0 0; font-size: 12px; line-height: 1.5; }
+.board-lock-scrim { position: absolute; inset: 0; z-index: 3; cursor: wait; background: rgba(255, 254, 249, .08); }
+
 .transcript-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); padding: 20px 18px 16px; overflow: auto; }
 .transcript-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--rule); }
 .transcript-live { display: inline-flex; align-items: center; gap: 6px; color: var(--pine); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -244,6 +266,12 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(40, 90, 74, 
   .focus-strip { padding: 15px 16px; }
   .board-grid { grid-template-columns: 1fr; }
   .board-working { grid-column: auto; }
+  .math-board { min-height: 500px; }
+  .math-board-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .board-tools-primary { flex: 1; }
+  .board-tools-primary button { flex: 1; padding: 0 7px; }
+  .board-turn-pill { width: 100%; justify-content: center; margin-left: 0; }
+  .math-board-canvas { min-height: 430px; }
   .working-line { display: block; }
   .working-line > span { display: block; min-width: 0; }
   .working-line small { display: block; margin-top: 4px; }

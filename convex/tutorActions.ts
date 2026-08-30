@@ -40,6 +40,57 @@ const preparationSchema = z.object({
   transferAnswer: z.string().min(1).max(200),
 });
 
+const normalizedCoordinate = z.number().min(0).max(1);
+const boardActionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("addText"),
+    text: z.string().min(1).max(80),
+    x: normalizedCoordinate,
+    y: normalizedCoordinate,
+  }),
+  z.object({
+    type: z.literal("addArrow"),
+    startX: normalizedCoordinate,
+    startY: normalizedCoordinate,
+    endX: normalizedCoordinate,
+    endY: normalizedCoordinate,
+  }),
+  z.object({
+    type: z.literal("highlight"),
+    x: normalizedCoordinate,
+    y: normalizedCoordinate,
+    width: z.number().min(0.04).max(0.5),
+    height: z.number().min(0.04).max(0.35),
+  }),
+  z.object({
+    type: z.literal("crossOut"),
+    startX: normalizedCoordinate,
+    startY: normalizedCoordinate,
+    endX: normalizedCoordinate,
+    endY: normalizedCoordinate,
+  }),
+]);
+
+const tutorTurnSchema = z.object({
+  chunks: z
+    .array(
+      z.object({
+        say: z.string().min(1).max(220),
+        actions: z.array(boardActionSchema).max(2),
+      }),
+    )
+    .min(1)
+    .max(3),
+});
+
+type TutorTurnPlan = z.infer<typeof tutorTurnSchema>;
+type TutorSpeechChunk = TutorTurnPlan["chunks"][number];
+type RespondToAudioResult = {
+  transcript: string;
+  tutorReply: string;
+  speechChunks: TutorSpeechChunk[];
+};
+
 function requiredEnv(name: string, value: string | undefined) {
   if (!value) throw new ConvexError(`${name} is not configured on the server.`);
   return value;
@@ -172,13 +223,31 @@ export const respondToAudio = action({
   args: {
     sessionId: v.id("tutorSessions"),
     audioStorageId: v.id("_storage"),
+    boardImageId: v.optional(v.id("_storage")),
+    boardSummary: v.string(),
   },
-  returns: v.object({ transcript: v.string(), tutorReply: v.string() }),
-  handler: async (ctx, args): Promise<{ transcript: string; tutorReply: string }> => {
+  returns: v.object({
+    transcript: v.string(),
+    tutorReply: v.string(),
+    speechChunks: v.array(
+      v.object({
+        say: v.string(),
+        actions: v.array(
+          v.union(
+            v.object({ type: v.literal("addText"), text: v.string(), x: v.number(), y: v.number() }),
+            v.object({ type: v.literal("addArrow"), startX: v.number(), startY: v.number(), endX: v.number(), endY: v.number() }),
+            v.object({ type: v.literal("highlight"), x: v.number(), y: v.number(), width: v.number(), height: v.number() }),
+            v.object({ type: v.literal("crossOut"), startX: v.number(), startY: v.number(), endX: v.number(), endY: v.number() }),
+          ),
+        ),
+      }),
+    ),
+  }),
+  handler: async (ctx, args): Promise<RespondToAudioResult> => {
     const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
       internal.tutorSessions.getInternal,
       {
-      sessionId: args.sessionId,
+        sessionId: args.sessionId,
       },
     );
     if (!session?.preparation) throw new ConvexError("The tutor is not ready yet.");
@@ -240,24 +309,49 @@ export const respondToAudio = action({
         nextStatus: "thinking",
       });
 
-      const generated = await createTutorAgent().generateText(
+      if (args.boardSummary.length > 20_000) {
+        throw new ConvexError("The board summary is too large to understand safely.");
+      }
+      const boardImage = args.boardImageId
+        ? await ctx.storage.get(args.boardImageId)
+        : null;
+      const prompt = buildTurnPrompt(session.preparation, transcript, args.boardSummary);
+      const content: Array<
+        | { type: "text"; text: string }
+        | { type: "image"; image: Uint8Array; mediaType: string }
+      > = [{ type: "text", text: prompt }];
+      if (boardImage && boardImage.size <= 5 * 1024 * 1024) {
+        content.push({
+          type: "image",
+          image: new Uint8Array(await boardImage.arrayBuffer()),
+          mediaType: boardImage.type || "image/png",
+        });
+      }
+
+      const { object }: { object: TutorTurnPlan } = await createTutorAgent().generateObject(
         ctx,
         { threadId: session.agentThreadId },
         {
-          prompt: buildTurnPrompt(session.preparation, transcript),
-          maxOutputTokens: 140,
+          schema: tutorTurnSchema,
+          messages: [{ role: "user", content }],
+          maxOutputTokens: 360,
         },
       );
-      const tutorReply = cleanTutorReply(generated.text);
+      const speechChunks: TutorSpeechChunk[] = object.chunks.map((chunk) => ({
+        say: cleanTutorReply(chunk.say),
+        actions: chunk.actions,
+      }));
+      const tutorReply = cleanTutorReply(speechChunks.map((chunk) => chunk.say).join(" "));
 
       await ctx.runMutation(internal.tutorSessions.saveTurn, {
         sessionId: args.sessionId,
         speaker: "tutor",
         text: tutorReply,
         nextStatus: "speaking",
+        speechChunks,
       });
 
-      return { transcript, tutorReply };
+      return { transcript, tutorReply, speechChunks };
     } catch (error) {
       const message = safeProviderMessage(error);
       await ctx.runMutation(internal.tutorSessions.markStatus, {
@@ -270,6 +364,11 @@ export const respondToAudio = action({
       await ctx.runMutation(internal.tutorSessions.deleteStorageObject, {
         storageId: args.audioStorageId,
       });
+      if (args.boardImageId) {
+        await ctx.runMutation(internal.tutorSessions.deleteStorageObject, {
+          storageId: args.boardImageId,
+        });
+      }
     }
   },
 });

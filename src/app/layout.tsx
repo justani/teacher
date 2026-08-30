@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ConvexClientProvider } from "./ConvexClientProvider";
+import "tldraw/tldraw.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

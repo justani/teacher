@@ -13,6 +13,11 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { playTutorSpeech } from "@/lib/tutorAudio";
+import {
+  SharedMathBoard,
+  type BoardAction,
+  type SharedMathBoardHandle,
+} from "./SharedMathBoard";
 
 type VoiceState = "listening" | "thinking" | "speaking";
 type SessionState = "ready" | "active" | "ended";
@@ -32,12 +37,6 @@ const voiceCopy: Record<VoiceState, { label: string; detail: string }> = {
   listening: { label: "Listening", detail: "Tell me what the question is asking us to find." },
   thinking: { label: "Thinking", detail: "I’m considering the smallest useful next question." },
   speaking: { label: "Speaking", detail: "Area of a sector uses part of the circle’s area." },
-};
-
-const focusCopy: Record<VoiceState, string> = {
-  listening: "Which formula should we use for the area of this sector?",
-  thinking: "Checking the formula you suggested…",
-  speaking: "Use the circle’s area, then take the 60° share.",
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -109,10 +108,12 @@ export function TutorSession() {
   const recordingTimeoutRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const talkPressActiveRef = useRef(false);
+  const boardRef = useRef<SharedMathBoardHandle>(null);
 
   const generateUploadUrl = useMutation(api.tutorSessions.generateUploadUrl);
   const createTutorSession = useMutation(api.tutorSessions.create);
   const finishPlayback = useMutation(api.tutorSessions.finishPlayback);
+  const saveBoardCheckpoint = useMutation(api.tutorSessions.saveBoardCheckpoint);
   const endTutorSession = useMutation(api.tutorSessions.end);
   const prepareTutor = useAction(api.tutorActions.prepare);
   const respondToAudio = useAction(api.tutorActions.respondToAudio);
@@ -235,11 +236,37 @@ export function TutorSession() {
     return result.storageId as Id<"_storage">;
   }
 
-  async function speak(text: string, activeSessionId: Id<"tutorSessions">) {
+  async function speakTutorTurn(
+    chunks: Array<{ say: string; actions: BoardAction[] }>,
+    activeSessionId: Id<"tutorSessions">,
+  ) {
     setVoiceState("speaking");
-    await playTutorSpeech(getAudioContext(), text);
-    await finishPlayback({ sessionId: activeSessionId });
-    setVoiceState("listening");
+    let tutorUsedBoard = false;
+    try {
+      for (const chunk of chunks) {
+        if (chunk.actions.length > 0) {
+          boardRef.current?.applyTutorActions(chunk.actions);
+          tutorUsedBoard = true;
+        }
+        await playTutorSpeech(getAudioContext(), chunk.say);
+      }
+
+      if (tutorUsedBoard) {
+        const checkpoint = await boardRef.current?.captureCheckpoint();
+        if (checkpoint) {
+          await saveBoardCheckpoint({
+            sessionId: activeSessionId,
+            actor: "tutor",
+            revision: checkpoint.revision,
+            document: checkpoint.document,
+            summary: checkpoint.summary,
+          });
+        }
+      }
+    } finally {
+      await finishPlayback({ sessionId: activeSessionId }).catch(() => undefined);
+      setVoiceState("listening");
+    }
   }
 
   async function startSession() {
@@ -259,7 +286,7 @@ export function TutorSession() {
       });
       setSessionId(newSessionId);
       const prepared = await prepareTutor({ sessionId: newSessionId });
-      await speak(prepared.tutorReply, newSessionId);
+      await speakTutorTurn([{ say: prepared.tutorReply, actions: [] }], newSessionId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "The tutor could not start.");
       setVoiceState("listening");
@@ -273,9 +300,24 @@ export function TutorSession() {
     setErrorMessage("");
     setVoiceState("thinking");
     try {
+      const checkpoint = await boardRef.current?.captureCheckpoint();
+      if (!checkpoint) throw new Error("The board is still loading. Please try again.");
+      await saveBoardCheckpoint({
+        sessionId,
+        actor: "learner",
+        revision: checkpoint.revision,
+        document: checkpoint.document,
+        summary: checkpoint.summary,
+      });
       const audioStorageId = await uploadBlob(blob);
-      const result = await respondToAudio({ sessionId, audioStorageId });
-      await speak(result.tutorReply, sessionId);
+      const boardImageId = checkpoint.image ? await uploadBlob(checkpoint.image) : undefined;
+      const result = await respondToAudio({
+        sessionId,
+        audioStorageId,
+        boardImageId,
+        boardSummary: checkpoint.summary,
+      });
+      await speakTutorTurn(result.speechChunks, sessionId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "I could not process that answer.");
       setVoiceState("listening");
@@ -436,13 +478,13 @@ export function TutorSession() {
             </section>
 
             <section className="board-panel session-board" aria-labelledby="board-heading">
-              <div className="board-heading"><div><p className="overline">Shared workspace</p><h2 id="board-heading">Tutor board</h2></div><span className="board-owner"><span aria-hidden="true" /> Tutor controlled</span></div>
-              <div className="focus-strip"><span className="board-label">Current focus</span><p>{focusCopy[voiceState]}</p></div>
-              <div className="board-grid">
-                <section className="board-area board-given"><span className="board-index">01</span><h3>What is given</h3><ul><li>Radius, <em>r</em> = 7 cm</li><li>Sector angle, <em>θ</em> = 60°</li></ul></section>
-                <section className="board-area board-find"><span className="board-index">02</span><h3>What we need to find</h3><p>Area of the shaded sector</p><span className="unit-note">Answer in cm²</span></section>
-                <section className="board-area board-working"><span className="board-index">03</span><h3>Working steps</h3><div className="working-line muted-working"><span className="strike">2πr</span><small>That finds circumference</small></div><div className="working-line active-working"><span>πr² × <span className="fraction"><span>θ</span><span>360</span></span></span><small>Your corrected formula</small></div><div className="next-line">Your next step goes here…</div></section>
-              </div>
+              <div className="board-heading"><div><p className="overline">Shared workspace</p><h2 id="board-heading">Working board</h2></div><span className="board-owner"><span aria-hidden="true" /> Shared by you and your tutor</span></div>
+              <SharedMathBoard
+                ref={boardRef}
+                editable={sessionState === "active" && voiceState === "listening" && !isRecording}
+                initialDocument={learnerView?.latestBoardDocument}
+                initialRevision={learnerView?.boardRevision}
+              />
             </section>
           </div>
           <TranscriptPanel voiceState={voiceState} turns={learnerView?.turns ?? []} />
