@@ -20,3 +20,4 @@
 ## Patterns
 
 - Compact session header — brand, topic plus one direct sentence explaining how Axiom helps, timer, then primary action. Use `14–17px` Georgia for the guidance and remove a separate intro band so the workspace begins immediately below the header.
+- Voice turn control — use one persistent toggle button rather than hold-to-talk. The resting state pairs a mic icon with `Press to talk`; the recording state pairs a stop icon with `Press to stop`, sets `aria-pressed`, and explains that the learner can speak naturally before pressing again. Space mirrors the same press-on / press-off behavior.

@@ -137,7 +137,7 @@ export function TutorSession() {
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimeoutRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const talkPressActiveRef = useRef(false);
+  const recordingStartingRef = useRef(false);
   const discardRecordingRef = useRef(false);
   const responseStartedAtRef = useRef<number | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
@@ -443,8 +443,8 @@ export function TutorSession() {
         logFrontendTiming("opening_audio_failed", startedAt, { flow: "opening" });
         setErrorMessage(
           error instanceof Error
-            ? `${error.message} You can still hold the mic and reply.`
-            : "Tutor audio could not play. You can still hold the mic and reply.",
+            ? `${error.message} You can still press the mic and reply.`
+            : "Tutor audio could not play. You can still press the mic and reply.",
         );
         setVoiceState("listening");
       }
@@ -512,7 +512,8 @@ export function TutorSession() {
   }
 
   async function startRecording() {
-    if (!sessionId || sessionState !== "active" || voiceState !== "listening" || isRecording) return;
+    if (!sessionId || sessionState !== "active" || voiceState !== "listening" || isRecording || recordingStartingRef.current) return;
+    recordingStartingRef.current = true;
     setErrorMessage("");
     try {
       await getAudioContext().resume();
@@ -546,7 +547,7 @@ export function TutorSession() {
         recordingStartedAtRef.current = null;
         audioChunksRef.current = [];
         if (!discardRecordingRef.current && recordingDurationMs < 600) {
-          setErrorMessage("Hold the mic a little longer so I can hear the complete answer.");
+          setErrorMessage("Speak a little longer so I can hear the complete answer.");
         } else if (!discardRecordingRef.current && audio.size > 0) {
           void submitRecording(audio, responseStartedAt);
         }
@@ -555,20 +556,16 @@ export function TutorSession() {
       recorder.start();
       recordingStartedAtRef.current = performance.now();
       setIsRecording(true);
-      if (!talkPressActiveRef.current) {
-        discardRecordingRef.current = true;
-        recorder.stop();
-        return;
-      }
       recordingTimeoutRef.current = window.setTimeout(() => stopRecording(), 30_000);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Microphone access was not available.");
       setIsRecording(false);
+    } finally {
+      recordingStartingRef.current = false;
     }
   }
 
   function stopRecording() {
-    talkPressActiveRef.current = false;
     if (recordingTimeoutRef.current) {
       window.clearTimeout(recordingTimeoutRef.current);
       recordingTimeoutRef.current = null;
@@ -581,21 +578,12 @@ export function TutorSession() {
     }
   }
 
-  function beginTalkPress(event?: ReactPointerEvent<HTMLButtonElement>) {
-    event?.preventDefault();
-    if (event && !event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.setPointerCapture(event.pointerId);
+  function toggleRecording() {
+    if (recorderRef.current?.state === "recording" || isRecording) {
+      stopRecording();
+      return;
     }
-    talkPressActiveRef.current = true;
     void startRecording();
-  }
-
-  function finishTalkPress(event?: ReactPointerEvent<HTMLButtonElement>) {
-    event?.preventDefault();
-    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    stopRecording();
   }
 
   async function endSession() {
@@ -618,8 +606,9 @@ export function TutorSession() {
       if (!sessionId || sessionState !== "active") return;
       event.preventDefault();
       if (event.repeat || voiceState !== "listening") return;
-      if (!talkPressActiveRef.current) {
-        talkPressActiveRef.current = true;
+      if (isRecording) {
+        stopRecordingShortcutRef.current();
+      } else {
         startRecordingShortcutRef.current();
       }
     }
@@ -628,8 +617,6 @@ export function TutorSession() {
       if (event.code !== "Space" || isTypingTarget(event.target)) return;
       if (!sessionId || sessionState !== "active") return;
       event.preventDefault();
-      if (!talkPressActiveRef.current && !isRecording) return;
-      stopRecordingShortcutRef.current();
     }
 
     window.addEventListener("keydown", handleKeyDown, { capture: true });
@@ -645,21 +632,18 @@ export function TutorSession() {
   const learnerCanAnswer = sessionState === "active" && Boolean(sessionId) && voiceState === "listening" && !isPreparing;
   const voiceDetail = sessionState === "ended"
     ? "Your question and transcript are still here."
-    : errorMessage || (isRecording ? "Keep holding while you answer." : voiceCopy[voiceState].detail);
+    : errorMessage || (isRecording ? "Speak naturally, then press stop when you’re done." : voiceCopy[voiceState].detail);
   const voiceDock = (
     <section className={`voice-dock voice-${voiceState} ${learnerCanAnswer ? "ready-to-speak" : ""} ${intakeState !== "confirmed" ? "intake-open" : ""}`} aria-label="Tutor voice controls">
       <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : isRecording ? "Listening" : voiceCopy[voiceState].label}</strong>{voiceDetail && <p>{voiceDetail}</p>}</div></div>
-      <div className="voice-instruction"><span>{learnerCanAnswer ? "Your turn — hold the button or press and hold Space, then speak" : isPreparing ? "Reading the question and preparing your tutor…" : voiceState === "speaking" ? "Listen to the tutor, then it will be your turn" : "The tutor is getting the next question ready"}</span></div>
+      <div className="voice-instruction"><span>{learnerCanAnswer ? "Your turn — press the button or Space to talk, then press again to stop" : isPreparing ? "Reading the question and preparing your tutor…" : voiceState === "speaking" ? "Listen to the tutor, then it will be your turn" : "The tutor is getting the next question ready"}</span></div>
       <button
         className={`mic-button ${isRecording ? "mic-on" : ""}`}
         type="button"
-        onPointerDown={beginTalkPress}
-        onPointerUp={finishTalkPress}
-        onPointerCancel={finishTalkPress}
-        onContextMenu={(event) => event.preventDefault()}
+        onClick={toggleRecording}
         disabled={sessionState !== "active" || !sessionId || voiceState !== "listening"}
         aria-pressed={isRecording}
-      ><Icon name="mic" /><span>{isRecording ? "Release to send" : "Hold to talk"}</span></button>
+      ><Icon name={isRecording ? "stop" : "mic"} /><span>{isRecording ? "Press to stop" : "Press to talk"}</span></button>
     </section>
   );
 
