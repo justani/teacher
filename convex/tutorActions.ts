@@ -214,8 +214,14 @@ If the image is ambiguous or incomplete, set confidence to low and explain exact
       const generated = await createTutorAgent().generateText(
         ctx,
         { threadId: session.agentThreadId },
-        { prompt: buildOpeningPrompt(preparation), maxOutputTokens: 120 },
+        { prompt: buildOpeningPrompt(preparation), maxOutputTokens: 256 },
       );
+      if (generated.finishReason === "length") {
+        console.error("Tutor opening generation reached its output limit", {
+          outputCharacters: generated.text.length,
+        });
+        throw new ConvexError("The tutor's opening question was cut short. Please retry the session.");
+      }
       const tutorReply = cleanTutorReply(generated.text);
       await ctx.runMutation(internal.tutorSessions.saveTurn, {
         sessionId: args.sessionId,

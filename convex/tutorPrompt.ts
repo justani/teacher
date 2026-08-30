@@ -68,5 +68,15 @@ export function cleanTutorReply(text: string) {
     return "Abhi tak question se tumhe kya samajh aa raha hai?";
   }
 
-  return plain.length <= 360 ? plain : `${plain.slice(0, 357).trimEnd()}…`;
+  if (plain.length <= 480) return plain;
+
+  const candidate = plain.slice(0, 480);
+  const sentenceEnd = Math.max(
+    candidate.lastIndexOf("."),
+    candidate.lastIndexOf("?"),
+    candidate.lastIndexOf("!"),
+  );
+  return sentenceEnd >= 80
+    ? candidate.slice(0, sentenceEnd + 1).trimEnd()
+    : `${candidate.slice(0, 477).trimEnd()}…`;
 }
