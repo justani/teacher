@@ -130,6 +130,28 @@ function safeProviderMessage(error: unknown) {
   return "The AI service could not complete that request. Please try again.";
 }
 
+function audioFileName(contentType: string) {
+  const baseType = contentType.split(";", 1)[0].toLowerCase();
+  if (baseType === "audio/mp4" || baseType === "audio/m4a") return "learner-answer.m4a";
+  if (baseType === "audio/ogg") return "learner-answer.ogg";
+  if (baseType === "audio/wav" || baseType === "audio/x-wav") return "learner-answer.wav";
+  if (baseType === "audio/mpeg") return "learner-answer.mp3";
+  return "learner-answer.webm";
+}
+
+function sarvamErrorDetails(body: unknown): { code?: string; requestId?: string } {
+  if (typeof body !== "object" || body === null || !("error" in body)) return {};
+  const error = body.error;
+  if (typeof error !== "object" || error === null) return {};
+  return {
+    code: "code" in error && typeof error.code === "string" ? error.code : undefined,
+    requestId:
+      "request_id" in error && typeof error.request_id === "string"
+        ? error.request_id
+        : undefined,
+  };
+}
+
 export const prepare = action({
   args: { sessionId: v.id("tutorSessions") },
   returns: v.object({ problemText: v.string(), tutorReply: v.string() }),
@@ -264,10 +286,15 @@ export const respondToAudio = action({
         throw new ConvexError("Please keep each answer under 30 seconds.");
       }
 
+      const normalizedAudioType = audio.type.split(";", 1)[0] || "application/octet-stream";
+      const normalizedAudio =
+        normalizedAudioType === audio.type
+          ? audio
+          : new Blob([await audio.arrayBuffer()], { type: normalizedAudioType });
       const form = new FormData();
-      form.append("file", audio, "learner-answer.webm");
+      form.append("file", normalizedAudio, audioFileName(normalizedAudioType));
       form.append("model", "saaras:v3");
-      form.append("mode", "transcribe");
+      form.append("mode", "translit");
       form.append("language_code", "unknown");
 
       const sttResponse = await fetch("https://api.sarvam.ai/speech-to-text", {
@@ -279,11 +306,22 @@ export const respondToAudio = action({
       });
 
       if (!sttResponse.ok) {
+        const providerBody: unknown = await sttResponse.json().catch(() => null);
+        const providerError = sarvamErrorDetails(providerBody);
+        console.error("Sarvam STT request failed", {
+          status: sttResponse.status,
+          audioBytes: audio.size,
+          audioType: audio.type || "unknown",
+          providerCode: providerError.code,
+          providerRequestId: providerError.requestId,
+        });
         const retryable = [429, 500, 503].includes(sttResponse.status);
         throw new ConvexError(
           retryable
             ? "Speech recognition is temporarily busy. Please try that answer once more."
-            : "I could not transcribe that recording. Please check the microphone and try again.",
+            : sttResponse.status === 400 || sttResponse.status === 422
+              ? "I could not read that recording. Hold the mic for at least one second and try again."
+              : "Speech recognition could not process that answer. Please try again.",
         );
       }
 

@@ -124,6 +124,7 @@ export function TutorSession() {
   const talkPressActiveRef = useRef(false);
   const discardRecordingRef = useRef(false);
   const responseStartedAtRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
   const startRecordingShortcutRef = useRef<() => void>(() => undefined);
   const stopRecordingShortcutRef = useRef<() => void>(() => undefined);
   const boardRef = useRef<SharedMathBoardHandle>(null);
@@ -414,12 +415,21 @@ export function TutorSession() {
           type: recorder.mimeType || preferredType || "application/octet-stream",
         });
         const responseStartedAt = responseStartedAtRef.current ?? performance.now();
+        const recordingDurationMs = recordingStartedAtRef.current
+          ? performance.now() - recordingStartedAtRef.current
+          : 0;
         responseStartedAtRef.current = null;
+        recordingStartedAtRef.current = null;
         audioChunksRef.current = [];
-        if (!discardRecordingRef.current && audio.size > 0) void submitRecording(audio, responseStartedAt);
+        if (!discardRecordingRef.current && recordingDurationMs < 600) {
+          setErrorMessage("Hold the mic a little longer so I can hear the complete answer.");
+        } else if (!discardRecordingRef.current && audio.size > 0) {
+          void submitRecording(audio, responseStartedAt);
+        }
         discardRecordingRef.current = false;
       };
-      recorder.start(250);
+      recorder.start();
+      recordingStartedAtRef.current = performance.now();
       setIsRecording(true);
       if (!talkPressActiveRef.current) {
         discardRecordingRef.current = true;
