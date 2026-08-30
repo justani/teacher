@@ -107,11 +107,7 @@ function openingGenerationOptions(prompt: string) {
   return {
     prompt,
     maxOutputTokens: OPENING_OUTPUT_TOKENS,
-    providerOptions: {
-      google: {
-        thinkingConfig: { thinkingLevel: "minimal" as const },
-      },
-    },
+    reasoning: "none" as const,
   };
 }
 
@@ -156,6 +152,18 @@ function createTutorAgent() {
 function safeProviderMessage(error: unknown) {
   if (error instanceof ConvexError) return error.message;
   return "The AI service could not complete that request. Please try again.";
+}
+
+function providerErrorMetadata(error: unknown) {
+  if (!(error instanceof Error)) return { errorType: typeof error };
+  const statusCode =
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    typeof error.statusCode === "number"
+      ? error.statusCode
+      : undefined;
+  return { errorName: error.name, statusCode };
 }
 
 function audioFileName(contentType: string) {
@@ -306,6 +314,10 @@ Return exactly one short, complete Hinglish question. Use no preamble and no exp
       stage = "complete";
       return { problemText: preparation.problemText, tutorReply };
     } catch (error) {
+      console.error("Tutor preparation failed", {
+        stage,
+        ...providerErrorMetadata(error),
+      });
       const message = safeProviderMessage(error);
       await ctx.runMutation(internal.tutorSessions.markStatus, {
         sessionId: args.sessionId,
@@ -515,6 +527,10 @@ export const respondToAudio = action({
       stage = "complete";
       return { transcript, tutorReply, speechChunks };
     } catch (error) {
+      console.error("Tutor learner-turn processing failed", {
+        stage,
+        ...providerErrorMetadata(error),
+      });
       const message = safeProviderMessage(error);
       await ctx.runMutation(internal.tutorSessions.markStatus, {
         sessionId: args.sessionId,
