@@ -80,7 +80,7 @@ function TranscriptPanel({ turns }: { turns: TranscriptTurn[] }) {
       <ol className="transcript-list">
         {turns.map((entry) => (
           <li key={entry._id} className={entry.speaker === "tutor" ? "tutor-line" : "learner-line"}>
-            <div><strong>{entry.speaker === "tutor" ? "Tutor" : "Tanusha"}</strong><time>{new Date(entry._creationTime).toLocaleTimeString([], { minute: "2-digit", second: "2-digit" })}</time></div>
+            <div><strong>{entry.speaker === "tutor" ? "Tutor" : "Student"}</strong><time>{new Date(entry._creationTime).toLocaleTimeString([], { minute: "2-digit", second: "2-digit" })}</time></div>
             <p>{entry.text}</p>
           </li>
         ))}
