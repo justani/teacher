@@ -467,6 +467,44 @@ export function TutorSession() {
     </section>
   );
 
+  if (intakeState === "crop" && sourceUrl) {
+    return (
+      <main className="crop-focus-shell">
+        <input ref={fileInputRef} className="visually-hidden" type="file" accept="image/*" onChange={handleUpload} />
+        <header className="crop-focus-header">
+          <div><p className="overline">Select one problem</p><h1>Crop the question</h1></div>
+          <button className="button button-quiet" type="button" onClick={() => fileInputRef.current?.click()}><Icon name="upload" />Change photo</button>
+        </header>
+
+        <div className="crop-focus-canvas">
+          <p className="crop-help">Drag the frame over one complete problem. Use a corner to resize it.</p>
+          <div className="crop-focus-image" ref={cropSurfaceRef}>
+            <img ref={sourceImageRef} src={sourceUrl} alt="Uploaded textbook page" draggable={false} />
+            <div className="crop-mask" aria-hidden="true" />
+            <div
+              className="crop-frame"
+              style={{ left: `${crop.x}%`, top: `${crop.y}%`, width: `${crop.width}%`, height: `${crop.height}%` }}
+              onPointerDown={(event) => beginCropInteraction(event, "move")}
+              onPointerMove={updateCropInteraction}
+              onPointerUp={finishCropInteraction}
+              onPointerCancel={finishCropInteraction}
+              role="img"
+              aria-label="Selected rectangular crop area"
+            >
+              {(["nw", "ne", "sw", "se"] as CropMode[]).map((mode) => <button key={mode} type="button" className={`crop-handle handle-${mode}`} aria-label={`Resize crop from ${mode} corner`} onPointerDown={(event) => { event.stopPropagation(); beginCropInteraction(event, mode); }} onPointerMove={updateCropInteraction} onPointerUp={finishCropInteraction} onPointerCancel={finishCropInteraction} />)}
+              <span className="crop-caption">Selected problem</span>
+            </div>
+          </div>
+        </div>
+
+        <footer className="crop-focus-actions">
+          <button className="button button-quiet" type="button" onClick={() => setCrop(DEFAULT_CROP)}><Icon name="reset" />Reset</button>
+          <button className="button button-primary" type="button" onClick={confirmCrop}><Icon name="crop" />Use this crop</button>
+        </footer>
+      </main>
+    );
+  }
+
   return (
     <main className="session-shell">
       <header className="session-header">
@@ -484,53 +522,25 @@ export function TutorSession() {
 
       <input ref={fileInputRef} className="visually-hidden" type="file" accept="image/*" onChange={handleUpload} />
 
-      {intakeState !== "confirmed" ? (
+      {intakeState === "upload" ? (
         <div className="workspace intake-workspace">
           <aside className="problem-panel" aria-labelledby="problem-heading">
           <div className="panel-heading">
-            <div><p className="overline">Your question</p><h2 id="problem-heading">{intakeState === "upload" ? "Add a textbook page" : "Select one problem"}</h2></div>
-            {intakeState !== "upload" && <button className="icon-button" type="button" onClick={() => fileInputRef.current?.click()} aria-label="Retake or change the page photo"><Icon name="upload" /></button>}
+            <div><p className="overline">Your question</p><h2 id="problem-heading">Add a textbook page</h2></div>
           </div>
 
-          {intakeState === "upload" ? (
-            <div className="upload-empty">
-              <span className="upload-illustration"><Icon name="image" /></span>
-              <h3>Upload the full page</h3>
-              <p>You’ll select the one problem you want to solve next.</p>
-              <button className="button button-primary" type="button" onClick={() => fileInputRef.current?.click()}><Icon name="upload" />Choose photo</button>
-              <span>JPG or PNG</span>
-            </div>
-          ) : intakeState === "crop" && sourceUrl ? (
-            <>
-              <p className="crop-help">Drag the frame to move it. Use a corner handle to resize it around one complete problem.</p>
-              <div className="problem-preview crop-preview" ref={cropSurfaceRef}>
-                <img ref={sourceImageRef} src={sourceUrl} alt="Uploaded textbook page" draggable={false} />
-                <div className="crop-mask" aria-hidden="true" />
-                <div
-                  className="crop-frame"
-                  style={{ left: `${crop.x}%`, top: `${crop.y}%`, width: `${crop.width}%`, height: `${crop.height}%` }}
-                  onPointerDown={(event) => beginCropInteraction(event, "move")}
-                  onPointerMove={updateCropInteraction}
-                  onPointerUp={finishCropInteraction}
-                  onPointerCancel={finishCropInteraction}
-                  role="img"
-                  aria-label="Selected rectangular crop area"
-                >
-                  {(["nw", "ne", "sw", "se"] as CropMode[]).map((mode) => <button key={mode} type="button" className={`crop-handle handle-${mode}`} aria-label={`Resize crop from ${mode} corner`} onPointerDown={(event) => { event.stopPropagation(); beginCropInteraction(event, mode); }} onPointerMove={updateCropInteraction} onPointerUp={finishCropInteraction} onPointerCancel={finishCropInteraction} />)}
-                  <span className="crop-caption">Selected problem</span>
-                </div>
-              </div>
-              <div className="crop-actions">
-                <button className="button button-quiet" type="button" onClick={() => setCrop(DEFAULT_CROP)}><Icon name="reset" />Reset selection</button>
-                <button className="button button-primary" type="button" onClick={confirmCrop}><Icon name="crop" />Confirm crop</button>
-              </div>
-            </>
-          ) : null}
+          <div className="upload-empty">
+            <span className="upload-illustration"><Icon name="image" /></span>
+            <h3>Upload the full page</h3>
+            <p>You’ll select the one problem you want to solve next.</p>
+            <button className="button button-primary" type="button" onClick={() => fileInputRef.current?.click()}><Icon name="upload" />Choose photo</button>
+            <span>JPG or PNG</span>
+          </div>
           </aside>
 
           <section className="board-panel" aria-labelledby="board-heading">
             <div className="board-heading"><div><p className="overline">Shared workspace</p><h2 id="board-heading">Tutor board</h2></div><span className="board-owner"><span aria-hidden="true" /> Tutor controlled</span></div>
-            <div className="board-waiting"><Icon name={intakeState === "crop" ? "crop" : "image"} /><div><span>{intakeState === "crop" ? "Select the exact problem" : "Your problem will appear here"}</span><p>{intakeState === "crop" ? "Confirm the crop when the full question and diagram are inside the frame." : "Upload a textbook page, then crop the one question you want to solve."}</p></div></div>
+            <div className="board-waiting"><Icon name="image" /><div><span>Your problem will appear here</span><p>Upload a textbook page, then crop the one question you want to solve.</p></div></div>
           </section>
         </div>
       ) : croppedUrl ? (
