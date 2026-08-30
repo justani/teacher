@@ -69,6 +69,35 @@ const boardActionSchema = z.discriminatedUnion("type", [
     endX: normalizedCoordinate,
     endY: normalizedCoordinate,
   }),
+  z.object({
+    type: z.literal("addCircle"),
+    x: normalizedCoordinate,
+    y: normalizedCoordinate,
+    width: z.number().min(0.06).max(0.65),
+    height: z.number().min(0.06).max(0.65),
+  }),
+  z.object({
+    type: z.literal("addLine"),
+    startX: normalizedCoordinate,
+    startY: normalizedCoordinate,
+    endX: normalizedCoordinate,
+    endY: normalizedCoordinate,
+  }),
+  z.object({
+    type: z.literal("moveTutorShape"),
+    targetId: z.string().min(1).max(160),
+    x: normalizedCoordinate,
+    y: normalizedCoordinate,
+  }),
+  z.object({
+    type: z.literal("updateTutorText"),
+    targetId: z.string().min(1).max(160),
+    text: z.string().min(1).max(80),
+  }),
+  z.object({
+    type: z.literal("removeTutorShape"),
+    targetId: z.string().min(1).max(160),
+  }),
 ]);
 
 const tutorTurnSchema = z.object({
@@ -367,6 +396,11 @@ export const respondToAudio = action({
             v.object({ type: v.literal("addArrow"), startX: v.number(), startY: v.number(), endX: v.number(), endY: v.number() }),
             v.object({ type: v.literal("highlight"), x: v.number(), y: v.number(), width: v.number(), height: v.number() }),
             v.object({ type: v.literal("crossOut"), startX: v.number(), startY: v.number(), endX: v.number(), endY: v.number() }),
+            v.object({ type: v.literal("addCircle"), x: v.number(), y: v.number(), width: v.number(), height: v.number() }),
+            v.object({ type: v.literal("addLine"), startX: v.number(), startY: v.number(), endX: v.number(), endY: v.number() }),
+            v.object({ type: v.literal("moveTutorShape"), targetId: v.string(), x: v.number(), y: v.number() }),
+            v.object({ type: v.literal("updateTutorText"), targetId: v.string(), text: v.string() }),
+            v.object({ type: v.literal("removeTutorShape"), targetId: v.string() }),
           ),
         ),
       }),

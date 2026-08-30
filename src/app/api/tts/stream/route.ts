@@ -11,6 +11,40 @@ function requiredEnv(name: string) {
   return value;
 }
 
+function requiredPrivateKey() {
+  let value = requiredEnv("GOOGLE_PRIVATE_KEY").trim();
+  if (value.startsWith('"') && value.endsWith('",')) {
+    value = value.slice(1, -2);
+  } else if (value.startsWith('"') && value.endsWith('"')) {
+    value = value.slice(1, -1);
+  }
+  value = value.replace(/\\n/g, "\n").trim();
+  if (
+    !value.startsWith("-----BEGIN PRIVATE KEY-----") ||
+    !value.endsWith("-----END PRIVATE KEY-----")
+  ) {
+    throw new Error("GOOGLE_PRIVATE_KEY is not a valid PEM private key.");
+  }
+  return value;
+}
+
+function providerErrorMetadata(error: unknown) {
+  if (!(error instanceof Error)) return { errorType: typeof error };
+  const record = error as Error & { code?: unknown; status?: unknown; statusCode?: unknown };
+  return {
+    errorName: error.name,
+    configurationError: error.message.startsWith("GOOGLE_") ? error.message : undefined,
+    code: typeof record.code === "string" || typeof record.code === "number"
+      ? record.code
+      : undefined,
+    status: typeof record.status === "number"
+      ? record.status
+      : typeof record.statusCode === "number"
+        ? record.statusCode
+        : undefined,
+  };
+}
+
 function createGeminiClient() {
   return new GoogleGenAI({
     vertexai: true,
@@ -19,7 +53,7 @@ function createGeminiClient() {
     googleAuthOptions: {
       credentials: {
         client_email: requiredEnv("GOOGLE_CLIENT_EMAIL"),
-        private_key: requiredEnv("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n"),
+        private_key: requiredPrivateKey(),
       },
     },
   });
@@ -67,7 +101,8 @@ export async function POST(request: Request) {
         },
       },
     });
-  } catch {
+  } catch (error) {
+    console.error("Gemini TTS request failed", providerErrorMetadata(error));
     return Response.json(
       { error: "Tutor audio could not be generated. Check the server TTS configuration." },
       { status: 502 },

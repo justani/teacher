@@ -72,6 +72,35 @@ export const boardAction = v.union(
     endX: v.number(),
     endY: v.number(),
   }),
+  v.object({
+    type: v.literal("addCircle"),
+    x: v.number(),
+    y: v.number(),
+    width: v.number(),
+    height: v.number(),
+  }),
+  v.object({
+    type: v.literal("addLine"),
+    startX: v.number(),
+    startY: v.number(),
+    endX: v.number(),
+    endY: v.number(),
+  }),
+  v.object({
+    type: v.literal("moveTutorShape"),
+    targetId: v.string(),
+    x: v.number(),
+    y: v.number(),
+  }),
+  v.object({
+    type: v.literal("updateTutorText"),
+    targetId: v.string(),
+    text: v.string(),
+  }),
+  v.object({
+    type: v.literal("removeTutorShape"),
+    targetId: v.string(),
+  }),
 );
 
 export const tutorSpeechChunk = v.object({

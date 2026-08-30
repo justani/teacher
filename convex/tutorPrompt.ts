@@ -46,7 +46,7 @@ ${transcript}
 ${boardSummary || "The learner has not added anything to the board yet."}
 </current_board>
 
-Respond with the smallest useful next tutoring move. Ask at most one question. Use at most two small board actions, and only when a visual mark makes the next move clearer. Board-action coordinates are normalized from 0 to 1 across the learner's visible board: x increases left to right and y increases top to bottom. Prefer an open area and never cover the learner's work. Do not complete the learner's work or mention the private preparation.`;
+Respond with the smallest useful next tutoring move. Ask at most one question. Each chunk's board actions happen immediately before that chunk's spoken text, so pair every visual action with the exact phrase that explains it. Use at most two small board actions, and only when a visual mark makes the next move clearer. Board-action coordinates are normalized from 0 to 1 across the learner's visible board: x increases left to right and y increases top to bottom. You may create text, circles, lines, arrows, highlights, and cross-outs. You may move, rewrite, or remove a shape only when its actor is tutor, using the exact targetId from the board summary. Never move, rewrite, or remove learner work. Prefer an open area and never cover the learner's work. Do not complete the learner's work or mention the private preparation.`;
 }
 
 function privateReference(preparation: Preparation) {

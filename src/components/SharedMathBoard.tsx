@@ -14,13 +14,19 @@ import {
   loadSnapshot,
   toRichText,
   type Editor,
+  type TLShapeId,
 } from "tldraw";
 
 export type BoardAction =
   | { type: "addText"; text: string; x: number; y: number }
   | { type: "addArrow"; startX: number; startY: number; endX: number; endY: number }
   | { type: "highlight"; x: number; y: number; width: number; height: number }
-  | { type: "crossOut"; startX: number; startY: number; endX: number; endY: number };
+  | { type: "crossOut"; startX: number; startY: number; endX: number; endY: number }
+  | { type: "addCircle"; x: number; y: number; width: number; height: number }
+  | { type: "addLine"; startX: number; startY: number; endX: number; endY: number }
+  | { type: "moveTutorShape"; targetId: string; x: number; y: number }
+  | { type: "updateTutorText"; targetId: string; text: string }
+  | { type: "removeTutorShape"; targetId: string };
 
 export type BoardCheckpoint = {
   document: string;
@@ -135,66 +141,124 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
           y: viewport.y + clamp01(y) * viewport.h,
         });
 
-        editor.run(() => {
-          for (const action of actions) {
-            if (action.type === "addText") {
-              const location = point(action.x, action.y);
-              editor.createShape({
-                id: createShapeId(),
-                type: "text",
-                x: location.x,
-                y: location.y,
-                meta: { actor: "tutor" },
-                props: {
-                  richText: toRichText(action.text),
-                  color: "green",
-                  font: "serif",
-                  size: "m",
-                },
-              });
-              continue;
-            }
+        const wasReadonly = editor.getIsReadonly();
+        if (wasReadonly) editor.updateInstanceState({ isReadonly: false });
 
-            if (action.type === "highlight") {
-              const location = point(action.x, action.y);
+        try {
+          editor.run(() => {
+            for (const action of actions) {
+              if (
+                action.type === "moveTutorShape" ||
+                action.type === "updateTutorText" ||
+                action.type === "removeTutorShape"
+              ) {
+                const target = editor.getShape(action.targetId as TLShapeId);
+                if (!target || target.meta.actor !== "tutor") continue;
+
+                if (action.type === "moveTutorShape") {
+                  const location = point(action.x, action.y);
+                  editor.updateShape({
+                    id: target.id,
+                    type: target.type,
+                    x: location.x,
+                    y: location.y,
+                  });
+                } else if (action.type === "updateTutorText" && target.type === "text") {
+                  editor.updateShape({
+                    id: target.id,
+                    type: "text",
+                    props: { richText: toRichText(action.text) },
+                  });
+                } else if (action.type === "removeTutorShape") {
+                  editor.deleteShape(target.id);
+                }
+                continue;
+              }
+
+              if (action.type === "addText") {
+                const location = point(action.x, action.y);
+                editor.createShape({
+                  id: createShapeId(),
+                  type: "text",
+                  x: location.x,
+                  y: location.y,
+                  meta: { actor: "tutor" },
+                  props: {
+                    richText: toRichText(action.text),
+                    color: "green",
+                    font: "serif",
+                    size: "m",
+                  },
+                });
+                continue;
+              }
+
+              if (action.type === "addCircle") {
+                const location = point(action.x, action.y);
+                editor.createShape({
+                  id: createShapeId(),
+                  type: "geo",
+                  x: location.x,
+                  y: location.y,
+                  meta: { actor: "tutor" },
+                  props: {
+                    geo: "ellipse",
+                    w: Math.max(48, action.width * viewport.w),
+                    h: Math.max(48, action.height * viewport.h),
+                    color: "green",
+                    fill: "none",
+                    dash: "draw",
+                  },
+                });
+                continue;
+              }
+
+              if (action.type === "highlight") {
+                const location = point(action.x, action.y);
+                editor.createShape({
+                  id: createShapeId(),
+                  type: "geo",
+                  x: location.x,
+                  y: location.y,
+                  opacity: 0.38,
+                  meta: { actor: "tutor" },
+                  props: {
+                    geo: "rectangle",
+                    w: Math.max(40, action.width * viewport.w),
+                    h: Math.max(28, action.height * viewport.h),
+                    color: "yellow",
+                    fill: "semi",
+                    dash: "draw",
+                  },
+                });
+                continue;
+              }
+
+              const start = point(action.startX, action.startY);
+              const end = point(action.endX, action.endY);
               editor.createShape({
                 id: createShapeId(),
-                type: "geo",
-                x: location.x,
-                y: location.y,
-                opacity: 0.38,
+                type: "arrow",
+                x: start.x,
+                y: start.y,
                 meta: { actor: "tutor" },
                 props: {
-                  geo: "rectangle",
-                  w: Math.max(40, action.width * viewport.w),
-                  h: Math.max(28, action.height * viewport.h),
-                  color: "yellow",
-                  fill: "semi",
+                  start: { x: 0, y: 0 },
+                  end: { x: end.x - start.x, y: end.y - start.y },
+                  color: action.type === "crossOut" ? "red" : "green",
                   dash: "draw",
+                  arrowheadStart: "none",
+                  arrowheadEnd:
+                    action.type === "crossOut" || action.type === "addLine"
+                      ? "none"
+                      : "arrow",
                 },
               });
-              continue;
             }
-
-            const start = point(action.startX, action.startY);
-            const end = point(action.endX, action.endY);
-            editor.createShape({
-              id: createShapeId(),
-              type: "arrow",
-              x: start.x,
-              y: start.y,
-              meta: { actor: "tutor" },
-              props: {
-                start: { x: 0, y: 0 },
-                end: { x: end.x - start.x, y: end.y - start.y },
-                color: action.type === "crossOut" ? "red" : "green",
-                dash: "draw",
-                arrowheadStart: "none",
-                arrowheadEnd: action.type === "crossOut" ? "none" : "arrow",
-              },
-            });
-          }
-        });
+          });
+        } finally {
+          if (wasReadonly) editor.updateInstanceState({ isReadonly: true });
+        }
         setHasContent(editor.getCurrentPageShapes().length > 0);
       },
     }), [editor]);
