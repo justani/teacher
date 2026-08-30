@@ -289,7 +289,16 @@ export function TutorSession() {
       });
       setSessionId(newSessionId);
       const prepared = await prepareTutor({ sessionId: newSessionId });
-      await speakTutorTurn([{ say: prepared.tutorReply, actions: [] }], newSessionId);
+      try {
+        await speakTutorTurn([{ say: prepared.tutorReply, actions: [] }], newSessionId);
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? `${error.message} You can still hold the mic and reply.`
+            : "Tutor audio could not play. You can still hold the mic and reply.",
+        );
+        setVoiceState("listening");
+      }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "The tutor could not start.");
       setVoiceState("listening");
