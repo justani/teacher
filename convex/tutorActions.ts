@@ -2,7 +2,7 @@
 
 import { Agent } from "@convex-dev/agent";
 import { createVertex } from "@ai-sdk/google-vertex";
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import { ConvexError, v } from "convex/values";
 import { z } from "zod";
 import { components, internal } from "./_generated/api";
@@ -116,14 +116,11 @@ const tutorTurnSchema = z.object({
     ),
 });
 
-const drawingPlanSchema = z.object({
-  actions: z.array(boardActionSchema).max(2),
-});
-
 type TutorTurnPlan = z.infer<typeof tutorTurnSchema>;
+type BoardAction = z.infer<typeof boardActionSchema>;
 type TutorSpeechChunk = {
   say: string;
-  actions: z.infer<typeof boardActionSchema>[];
+  actions: BoardAction[];
 };
 type RespondToAudioResult = {
   transcript: string;
@@ -154,6 +151,98 @@ function openingGenerationOptions(prompt: string) {
 
 function elapsedMs(startedAt: number) {
   return Math.max(0, Date.now() - startedAt);
+}
+
+function parseDrawingNumber(value: string | undefined) {
+  if (value === undefined || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseDrawingProtocol(text: string): BoardAction[] {
+  const actions: BoardAction[] = [];
+  const lines = text
+    .replace(/```(?:text)?/gi, "")
+    .replace(/```/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-*]\s*/, ""))
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (line.toUpperCase() === "NONE") return [];
+    const parts = line.split("|").map((part) => part.trim());
+    const command = parts[0]?.toUpperCase();
+    const number = (index: number) => parseDrawingNumber(parts[index]);
+    let candidate: unknown = null;
+
+    if (command === "TEXT" && number(1) !== null && number(2) !== null) {
+      candidate = {
+        type: "addText",
+        x: number(1),
+        y: number(2),
+        text: parts.slice(3).join("|").trim(),
+      };
+    } else if (
+      ["ARROW", "CROSS_OUT", "LINE"].includes(command ?? "") &&
+      number(1) !== null &&
+      number(2) !== null &&
+      number(3) !== null &&
+      number(4) !== null
+    ) {
+      candidate = {
+        type:
+          command === "ARROW"
+            ? "addArrow"
+            : command === "CROSS_OUT"
+              ? "crossOut"
+              : "addLine",
+        startX: number(1),
+        startY: number(2),
+        endX: number(3),
+        endY: number(4),
+      };
+    } else if (
+      ["HIGHLIGHT", "CIRCLE"].includes(command ?? "") &&
+      number(1) !== null &&
+      number(2) !== null &&
+      number(3) !== null &&
+      number(4) !== null
+    ) {
+      candidate = {
+        type: command === "HIGHLIGHT" ? "highlight" : "addCircle",
+        x: number(1),
+        y: number(2),
+        width: number(3),
+        height: number(4),
+      };
+    } else if (
+      command === "MOVE" &&
+      parts[1] &&
+      number(2) !== null &&
+      number(3) !== null
+    ) {
+      candidate = {
+        type: "moveTutorShape",
+        targetId: parts[1],
+        x: number(2),
+        y: number(3),
+      };
+    } else if (command === "UPDATE_TEXT" && parts[1]) {
+      candidate = {
+        type: "updateTutorText",
+        targetId: parts[1],
+        text: parts.slice(2).join("|").trim(),
+      };
+    } else if (command === "REMOVE" && parts[1]) {
+      candidate = { type: "removeTutorShape", targetId: parts[1] };
+    }
+
+    const parsed = boardActionSchema.safeParse(candidate);
+    if (parsed.success) actions.push(parsed.data);
+    if (actions.length === 2) break;
+  }
+
+  return actions;
 }
 
 function requiredEnv(name: string, value: string | undefined) {
@@ -635,7 +724,7 @@ export const generateDrawing = action({
     drawingDirection: v.string(),
   },
   returns: v.object({ actions: v.array(boardAction) }),
-  handler: async (ctx, args): Promise<{ actions: z.infer<typeof boardActionSchema>[] }> => {
+  handler: async (ctx, args): Promise<{ actions: BoardAction[] }> => {
     try {
       const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
         internal.tutorSessions.getInternal,
@@ -675,13 +764,44 @@ export const generateDrawing = action({
       }
 
       const { provider, model } = createGeminiProvider();
-      const result: { object: z.infer<typeof drawingPlanSchema> } = await generateObject({
+      let generated = await generateText({
         model: provider(model),
-        schema: drawingPlanSchema,
         messages: [{ role: "user", content }],
-        maxOutputTokens: 512,
+        maxOutputTokens: 256,
       });
-      return result.object;
+      let actions = parseDrawingProtocol(generated.text);
+
+      if (actions.length === 0 && generated.text.trim().toUpperCase() !== "NONE") {
+        console.warn("Tutor drawing output was malformed; retrying", {
+          finishReason: generated.finishReason,
+          outputCharacters: generated.text.length,
+        });
+        generated = await generateText({
+          model: provider(model),
+          messages: [
+            {
+              role: "user",
+              content: [
+                ...content,
+                {
+                  type: "text",
+                  text: "Your prior response did not match the required line protocol. Return only NONE or one or two valid protocol lines. Do not add prose or Markdown.",
+                },
+              ],
+            },
+          ],
+          maxOutputTokens: 256,
+        });
+        actions = parseDrawingProtocol(generated.text);
+      }
+
+      if (actions.length === 0 && generated.text.trim().toUpperCase() !== "NONE") {
+        console.warn("Tutor drawing output remained malformed", {
+          finishReason: generated.finishReason,
+          outputCharacters: generated.text.length,
+        });
+      }
+      return { actions };
     } catch (error) {
       console.warn("Tutor drawing generation failed; continuing with speech", {
         ...providerErrorMetadata(error),

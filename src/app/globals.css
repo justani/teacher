@@ -196,6 +196,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(40, 90, 74, 
 .board-turn-pill > span { width: 7px; height: 7px; border-radius: 50%; background: var(--terracotta); box-shadow: 0 0 0 3px var(--terracotta-wash); }
 .board-turn-pill.learner-turn { color: var(--pine); background: var(--pine-wash); }
 .board-turn-pill.learner-turn > span { background: var(--pine); box-shadow: 0 0 0 3px rgba(40, 90, 74, .1); }
+.board-turn-pill.drawing-turn { color: var(--pine); background: var(--pine-wash); }
+.board-turn-pill.drawing-turn > span { background: var(--pine); box-shadow: 0 0 0 3px rgba(40, 90, 74, .12); animation: board-drawing-pulse 1.1s cubic-bezier(.23, 1, .32, 1) infinite; }
+@keyframes board-drawing-pulse { 50% { opacity: .35; transform: scale(.72); } }
 .math-board-canvas { position: relative; min-height: 505px; overflow: hidden; background: repeating-linear-gradient(to bottom, transparent 0, transparent 31px, rgba(50, 96, 119, .065) 32px), #fffef9; }
 .math-board-canvas .tl-container { position: absolute; inset: 0; background: transparent; }
 .math-board-canvas .tl-background { background-color: transparent; }
@@ -204,6 +207,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(40, 90, 74, 
 .board-empty-hint span { color: var(--graphite-soft); font-family: Georgia, "Times New Roman", serif; font-size: 20px; }
 .board-empty-hint p { margin: 7px 0 0; font-size: 12px; line-height: 1.5; }
 .board-lock-scrim { position: absolute; inset: 0; z-index: 3; cursor: wait; background: rgba(255, 254, 249, .08); }
+
+@media (prefers-reduced-motion: reduce) {
+  .board-turn-pill.drawing-turn > span { animation: none; }
+}
 
 .conversation-column { position: sticky; top: 16px; display: grid; min-width: 0; max-height: calc(100vh - 32px); grid-template-rows: minmax(0, 1fr) auto; gap: 12px; }
 .transcript-panel { min-height: 0; padding: 20px 18px 16px; overflow: auto; }

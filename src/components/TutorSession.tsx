@@ -115,6 +115,7 @@ export function TutorSession() {
   const [voiceState, setVoiceState] = useState<VoiceState>("listening");
   const [isRecording, setIsRecording] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
+  const [isDrawing, setIsDrawing] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(15 * 60);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
@@ -381,25 +382,31 @@ export function TutorSession() {
     speech: string,
     drawingDirection: string,
   ) {
-    const result = await generateDrawing({
-      sessionId: activeSessionId,
-      boardImageId,
-      boardSummary,
-      speech,
-      drawingDirection,
-    });
-    if (result.actions.length === 0) return;
+    const shouldShowDrawing = drawingDirection.trim().length > 0;
+    if (shouldShowDrawing) setIsDrawing(true);
+    try {
+      const result = await generateDrawing({
+        sessionId: activeSessionId,
+        boardImageId,
+        boardSummary,
+        speech,
+        drawingDirection,
+      });
+      if (result.actions.length === 0) return;
 
-    boardRef.current?.applyTutorActions(result.actions);
-    const checkpoint = await boardRef.current?.captureCheckpoint();
-    if (!checkpoint) return;
-    await saveBoardCheckpoint({
-      sessionId: activeSessionId,
-      actor: "tutor",
-      revision: checkpoint.revision,
-      document: checkpoint.document,
-      summary: checkpoint.summary,
-    });
+      boardRef.current?.applyTutorActions(result.actions);
+      const checkpoint = await boardRef.current?.captureCheckpoint();
+      if (!checkpoint) return;
+      await saveBoardCheckpoint({
+        sessionId: activeSessionId,
+        actor: "tutor",
+        revision: checkpoint.revision,
+        document: checkpoint.document,
+        summary: checkpoint.summary,
+      });
+    } finally {
+      if (shouldShowDrawing) setIsDrawing(false);
+    }
   }
 
   async function startSession(problemImageUrl = croppedUrl) {
@@ -764,6 +771,7 @@ export function TutorSession() {
               <SharedMathBoard
                 ref={boardRef}
                 editable={sessionState === "active" && voiceState === "listening" && !isRecording}
+                isDrawing={isDrawing}
                 initialDocument={learnerView?.latestBoardDocument}
                 initialRevision={learnerView?.boardRevision}
               />

@@ -44,6 +44,7 @@ type BoardTool = "draw" | "eraser" | "select";
 
 type SharedMathBoardProps = {
   editable: boolean;
+  isDrawing?: boolean;
   initialDocument?: string;
   initialRevision?: number;
 };
@@ -84,7 +85,7 @@ function summarizeBoard(editor: Editor) {
 }
 
 export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoardProps>(
-  function SharedMathBoard({ editable, initialDocument, initialRevision = 0 }, ref) {
+  function SharedMathBoard({ editable, isDrawing = false, initialDocument, initialRevision = 0 }, ref) {
     const [editor, setEditor] = useState<Editor | null>(null);
     const [activeTool, setActiveTool] = useState<BoardTool>("draw");
     const [hasContent, setHasContent] = useState(false);
@@ -296,8 +297,12 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
           <button type="button" className="board-undo" onClick={handleUndo} disabled={!editable || !hasContent}>
             <span aria-hidden="true">↶</span> Undo
           </button>
-          <span className={`board-turn-pill ${editable ? "learner-turn" : "tutor-turn"}`}>
-            <span aria-hidden="true" /> {editable ? "Your turn" : "Tutor is using the board"}
+          <span
+            className={`board-turn-pill ${editable ? "learner-turn" : "tutor-turn"} ${isDrawing ? "drawing-turn" : ""}`}
+            role="status"
+            aria-live="polite"
+          >
+            <span aria-hidden="true" /> {isDrawing ? "Tutor is drawing…" : editable ? "Your turn" : "Tutor is using the board"}
           </span>
         </div>
         <div className="math-board-canvas">
