@@ -32,6 +32,7 @@ type TranscriptTurn = {
 };
 
 const DEFAULT_CROP: CropSelection = { x: 8, y: 18, width: 84, height: 38 };
+const MIN_CROP_PERCENT = 6;
 
 const voiceCopy: Record<VoiceState, { label: string; detail: string }> = {
   listening: { label: "Listening", detail: "Tell me what the question is asking us to find." },
@@ -172,7 +173,7 @@ export function TutorSession() {
     const dx = ((event.clientX - interaction.startX) / bounds.width) * 100;
     const dy = ((event.clientY - interaction.startY) / bounds.height) * 100;
     const initial = interaction.initial;
-    const minSize = 18;
+    const minSize = MIN_CROP_PERCENT;
 
     if (interaction.mode === "move") {
       setCrop({ ...initial, x: clamp(initial.x + dx, 0, 100 - initial.width), y: clamp(initial.y + dy, 0, 100 - initial.height) });
