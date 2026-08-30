@@ -100,6 +100,7 @@ export function TutorSession() {
   const [intakeState, setIntakeState] = useState<IntakeState>("upload");
   const [voiceState, setVoiceState] = useState<VoiceState>("listening");
   const [isRecording, setIsRecording] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(15 * 60);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
@@ -224,8 +225,10 @@ export function TutorSession() {
     const context = canvas.getContext("2d");
     if (!context) return;
     context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
-    setCroppedUrl(canvas.toDataURL("image/jpeg", 0.92));
+    const croppedImageUrl = canvas.toDataURL("image/jpeg", 0.92);
+    setCroppedUrl(croppedImageUrl);
     setIntakeState("confirmed");
+    void startSession(croppedImageUrl);
   }
 
   function getAudioContext() {
@@ -304,18 +307,18 @@ export function TutorSession() {
     }
   }
 
-  async function startSession() {
-    if (intakeState !== "confirmed" || !croppedUrl || sessionState === "active") return;
+  async function startSession(problemImageUrl = croppedUrl) {
+    if (!problemImageUrl || sessionState === "active" || isPreparing) return;
     const startedAt = performance.now();
     logFrontendTiming("opening_started", startedAt, { flow: "opening" });
     setErrorMessage("");
-    setSessionState("active");
+    setIsPreparing(true);
     setVoiceState("thinking");
     if (secondsRemaining === 0) setSecondsRemaining(15 * 60);
 
     try {
       await getAudioContext().resume();
-      const imageBlob = await fetch(croppedUrl).then((response) => response.blob());
+      const imageBlob = await fetch(problemImageUrl).then((response) => response.blob());
       const problemImageId = await uploadBlob(imageBlob);
       logFrontendTiming("problem_image_uploaded", startedAt, { flow: "opening" });
       const newSessionId = await createTutorSession({
@@ -326,6 +329,8 @@ export function TutorSession() {
       logFrontendTiming("session_created", startedAt, { flow: "opening" });
       const prepared = await prepareTutor({ sessionId: newSessionId });
       logFrontendTiming("tutor_text_ready", startedAt, { flow: "opening" });
+      setIsPreparing(false);
+      setSessionState("active");
       try {
         await speakTutorTurn(
           [{ say: prepared.tutorReply, actions: [] }],
@@ -343,6 +348,7 @@ export function TutorSession() {
       }
     } catch (error) {
       logFrontendTiming("opening_failed", startedAt, { flow: "opening" });
+      setIsPreparing(false);
       setErrorMessage(error instanceof Error ? error.message : "The tutor could not start.");
       setVoiceState("listening");
       setSessionState("ready");
@@ -516,10 +522,11 @@ export function TutorSession() {
 
   const minutes = Math.floor(secondsRemaining / 60).toString().padStart(2, "0");
   const seconds = (secondsRemaining % 60).toString().padStart(2, "0");
+  const learnerCanAnswer = sessionState === "active" && Boolean(sessionId) && voiceState === "listening" && !isPreparing;
   const voiceDock = (
-    <section className={`voice-dock voice-${voiceState} ${intakeState !== "confirmed" ? "intake-open" : ""}`} aria-label="Tutor voice controls">
+    <section className={`voice-dock voice-${voiceState} ${learnerCanAnswer ? "ready-to-speak" : ""} ${intakeState !== "confirmed" ? "intake-open" : ""}`} aria-label="Tutor voice controls">
       <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : isRecording ? "Listening" : voiceCopy[voiceState].label}</strong><p>{sessionState === "ended" ? "Your question and transcript are still here." : errorMessage || (isRecording ? "Keep holding while you answer." : voiceCopy[voiceState].detail)}</p></div></div>
-      <div className="voice-instruction"><span>{sessionState === "active" && sessionId ? "Hold the button or Space while you speak" : "Start the session after confirming your crop"}</span></div>
+      <div className="voice-instruction"><span>{learnerCanAnswer ? "Your turn — hold the button or press and hold Space, then speak" : isPreparing ? "Reading the question and preparing your tutor…" : voiceState === "speaking" ? "Listen to the tutor, then it will be your turn" : "The tutor is getting the next question ready"}</span></div>
       <button
         className={`mic-button ${isRecording ? "mic-on" : ""}`}
         type="button"
@@ -577,7 +584,7 @@ export function TutorSession() {
         <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">∠</span><div><span className="brand-name">Axiom</span><span className="brand-context">Personal maths session</span></div></div>
         <div className="session-clock" aria-label={`${minutes} minutes and ${seconds} seconds remaining`}><span className="clock-label">Session time</span><strong>{minutes}:{seconds}</strong></div>
         <div className="header-actions">
-          {sessionState !== "active" ? <button className="button button-primary" type="button" onClick={() => void startSession()} disabled={intakeState !== "confirmed"}><Icon name="play" />{sessionState === "ended" ? "Start again" : "Start session"}</button> : <button className="button button-quiet button-danger" type="button" onClick={() => void endSession()}><Icon name="stop" />End session</button>}
+          {isPreparing ? <button className="button button-primary" type="button" disabled><span className="button-loader" aria-hidden="true" />Preparing tutor</button> : sessionState !== "active" ? <button className="button button-primary" type="button" onClick={() => void startSession()} disabled={intakeState !== "confirmed"}><Icon name="play" />{sessionState === "ended" ? "Start again" : intakeState === "confirmed" ? "Retry session" : "Starts after crop"}</button> : <button className="button button-quiet button-danger" type="button" onClick={() => void endSession()}><Icon name="stop" />End session</button>}
         </div>
       </header>
 
@@ -616,11 +623,17 @@ export function TutorSession() {
               <div className="cropped-problem-heading">
                 <div><p className="overline">Your question</p><h2 id="selected-problem-heading">Selected problem</h2></div>
                 <div className="problem-actions">
-                  <button type="button" onClick={() => setIntakeState("crop")}><Icon name="crop" />Adjust crop</button>
-                  <button type="button" onClick={() => fileInputRef.current?.click()}><Icon name="upload" />Change photo</button>
+                  <button type="button" onClick={() => setIntakeState("crop")} disabled={isPreparing}><Icon name="crop" />Adjust crop</button>
+                  <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isPreparing}><Icon name="upload" />Change photo</button>
                 </div>
               </div>
-              {learnerView?.problemText ? (
+              {isPreparing ? (
+                <div className="preparation-loader" role="status" aria-live="polite">
+                  <span className="preparation-spinner" aria-hidden="true" />
+                  <strong>Reading your question</strong>
+                  <p>Extracting the problem and preparing the tutor’s first question…</p>
+                </div>
+              ) : learnerView?.problemText ? (
                 <div className="extracted-problem-text">
                   <span>Extracted question</span>
                   <p>{learnerView.problemText}</p>
