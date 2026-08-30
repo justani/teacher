@@ -70,7 +70,7 @@ function Icon({ name }: { name: "upload" | "mic" | "stop" | "play" | "image" | "
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
 
-function TranscriptPanel({ voiceState, turns }: { voiceState: VoiceState; turns: TranscriptTurn[] }) {
+function TranscriptPanel({ turns }: { turns: TranscriptTurn[] }) {
   return (
     <aside className="transcript-panel" aria-labelledby="transcript-heading">
       <div className="transcript-heading">
@@ -85,10 +85,6 @@ function TranscriptPanel({ voiceState, turns }: { voiceState: VoiceState; turns:
           </li>
         ))}
         {turns.length === 0 && <li className="transcript-empty"><p>The conversation will appear here when the tutor is ready.</p></li>}
-        <li className="transcript-current" aria-live="polite">
-          <div><strong>Tutor</strong><span>{voiceCopy[voiceState].label}</span></div>
-          <p>{voiceCopy[voiceState].detail}</p>
-        </li>
       </ol>
       <p className="transcript-note">Voice transcript appears here as the session continues.</p>
     </aside>
@@ -655,7 +651,7 @@ export function TutorSession() {
             </section>
           </div>
           <div className="conversation-column">
-            <TranscriptPanel voiceState={voiceState} turns={learnerView?.turns ?? []} />
+            <TranscriptPanel turns={learnerView?.turns ?? []} />
             {voiceDock}
           </div>
         </div>
