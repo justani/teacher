@@ -140,6 +140,7 @@ type BackendLatencyStage =
   | "complete";
 
 const OPENING_OUTPUT_TOKENS = 1024;
+const MAX_DRAWING_ACTIONS = 6;
 
 function openingGenerationOptions(prompt: string) {
   return {
@@ -239,7 +240,7 @@ function parseDrawingProtocol(text: string): BoardAction[] {
 
     const parsed = boardActionSchema.safeParse(candidate);
     if (parsed.success) actions.push(parsed.data);
-    if (actions.length === 2) break;
+    if (actions.length === MAX_DRAWING_ACTIONS) break;
   }
 
   return actions;
@@ -768,7 +769,7 @@ export const generateDrawing = action({
         model: provider(model),
         messages: [{ role: "user", content }],
         maxOutputTokens: 1024,
-        reasoning: "none",
+        reasoning: "medium",
       });
       let actions = parseDrawingProtocol(generated.text);
 
@@ -786,13 +787,13 @@ export const generateDrawing = action({
                 ...content,
                 {
                   type: "text",
-                  text: "Your prior response did not match the required line protocol. Return only NONE or one or two valid protocol lines. Do not add prose or Markdown.",
+                  text: "Your prior response did not match the required line protocol. Return only NONE or one to six valid protocol lines. Do not add prose or Markdown.",
                 },
               ],
             },
           ],
           maxOutputTokens: 1024,
-          reasoning: "none",
+          reasoning: "medium",
         });
         actions = parseDrawingProtocol(generated.text);
       }
@@ -803,6 +804,11 @@ export const generateDrawing = action({
           outputCharacters: generated.text.length,
         });
       }
+      console.info("Tutor drawing actions generated", {
+        finishReason: generated.finishReason,
+        actionCount: actions.length,
+        actionTypes: actions.map((action) => action.type),
+      });
       return { actions };
     } catch (error) {
       console.warn("Tutor drawing generation failed; continuing with speech", {
