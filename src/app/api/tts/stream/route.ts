@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,20 +52,20 @@ export async function POST(request: Request) {
 
   let stream;
   try {
-    stream = await createGeminiClient().interactions.create({
+    stream = await createGeminiClient().models.generateContentStream({
       model: process.env.GEMINI_TTS_MODEL ?? "gemini-3.1-flash-tts-preview",
-      input: `Speak as a warm, concise female Indian maths tutor. Read only this response naturally, including any Hinglish and spoken maths:\n\n${text}`,
-      response_format: {
-        type: "audio",
-        mime_type: "audio/l16",
-        sample_rate: 24000,
-        delivery: "inline",
+      contents: `Speak as a warm, concise female Indian maths tutor. Read only this response naturally, including any Hinglish and spoken maths:\n\n${text}`,
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          languageCode: "en-IN",
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: process.env.GEMINI_TTS_VOICE ?? "Kore",
+            },
+          },
+        },
       },
-      generation_config: {
-        speech_config: [{ voice: process.env.GEMINI_TTS_VOICE ?? "Kore" }],
-      },
-      stream: true,
-      store: false,
     });
   } catch {
     return Response.json(
@@ -78,12 +78,12 @@ export async function POST(request: Request) {
     async start(controller) {
       try {
         for await (const event of stream) {
-          if (
-            event.event_type === "step.delta" &&
-            event.delta.type === "audio" &&
-            event.delta.data
-          ) {
-            controller.enqueue(Buffer.from(event.delta.data, "base64"));
+          for (const candidate of event.candidates ?? []) {
+            for (const part of candidate.content?.parts ?? []) {
+              if (part.inlineData?.data) {
+                controller.enqueue(Buffer.from(part.inlineData.data, "base64"));
+              }
+            }
           }
         }
         controller.close();
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
 
   return new Response(audio, {
     headers: {
-      "Content-Type": "audio/l16;rate=24000;channels=1",
+      "Content-Type": "audio/pcm;rate=24000;channels=1",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },

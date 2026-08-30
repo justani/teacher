@@ -42,7 +42,7 @@ export async function playTutorSpeech(context: AudioContext, text: string) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, completeByteCount);
 
     for (let index = 0; index < sampleCount; index += 1) {
-      channel[index] = view.getInt16(index * 2, false) / 32768;
+      channel[index] = view.getInt16(index * 2, true) / 32768;
     }
 
     const source = context.createBufferSource();
