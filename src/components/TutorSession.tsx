@@ -36,7 +36,7 @@ const DEFAULT_CROP: CropSelection = { x: 8, y: 18, width: 84, height: 38 };
 const MIN_CROP_PERCENT = 6;
 
 const voiceCopy: Record<VoiceState, { label: string; detail: string }> = {
-  listening: { label: "Listening", detail: "" },
+  listening: { label: "Your turn", detail: "" },
   thinking: { label: "Thinking", detail: "I’m considering the smallest useful next question." },
   speaking: { label: "Speaking", detail: "Area of a sector uses part of the circle’s area." },
 };
