@@ -190,7 +190,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(40, 90, 74, 
 .board-empty-hint p { margin: 7px 0 0; font-size: 12px; line-height: 1.5; }
 .board-lock-scrim { position: absolute; inset: 0; z-index: 3; cursor: wait; background: rgba(255, 254, 249, .08); }
 
-.transcript-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); padding: 20px 18px 16px; overflow: auto; }
+.conversation-column { position: sticky; top: 16px; display: grid; min-width: 0; max-height: calc(100vh - 32px); grid-template-rows: minmax(0, 1fr) auto; gap: 12px; }
+.transcript-panel { min-height: 0; padding: 20px 18px 16px; overflow: auto; }
 .transcript-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--rule); }
 .transcript-live { display: inline-flex; align-items: center; gap: 6px; color: var(--pine); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .transcript-live > span { width: 7px; height: 7px; border-radius: 50%; background: var(--terracotta); box-shadow: 0 0 0 4px var(--terracotta-wash); }
@@ -221,6 +222,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(40, 90, 74, 
 .state-preview button:hover { background: var(--control); }
 .state-preview button.active { color: var(--pine); background: var(--pine-wash); }
 .voice-instruction { color: var(--graphite-faint); font-size: 11px; font-weight: 700; }
+.conversation-column .voice-dock { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 0; padding: 11px 12px; }
+.conversation-column .voice-instruction { grid-column: 1 / -1; grid-row: 2; }
+.conversation-column .mic-button { grid-column: 2; grid-row: 1; }
 .transcript-empty { color: var(--graphite-faint); font-size: 13px; line-height: 1.5; }
 .mic-button { display: flex; min-width: 96px; min-height: 46px; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--rule); border-radius: 12px; background: var(--control); font-size: 12px; font-weight: 800; cursor: pointer; touch-action: none; user-select: none; transition: background-color 150ms cubic-bezier(.23,1,.32,1), transform 120ms cubic-bezier(.23,1,.32,1); }
 .mic-button svg { width: 17px; height: 17px; }
@@ -231,8 +235,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(40, 90, 74, 
 @media (max-width: 960px) {
   .session-shell { width: min(100% - 24px, 760px); }
   .workspace, .session-workspace { grid-template-columns: 1fr; }
+  .learning-column { display: contents; }
+  .cropped-problem-panel { order: 1; }
+  .conversation-column { position: static; order: 2; max-height: none; grid-template-rows: auto auto; }
+  .session-board { order: 3; }
   .problem-preview { min-height: 430px; }
-  .transcript-panel { position: static; max-height: none; }
   .voice-dock { grid-template-columns: 1fr auto; }
   .state-preview { grid-column: 1 / -1; grid-row: 2; order: 3; padding-top: 10px; border-top: 1px solid var(--rule-soft); }
 }
@@ -281,8 +288,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(40, 90, 74, 
   .state-preview { overflow-x: auto; }
   .state-preview > span { display: none; }
   .state-preview button { flex: 1; }
-  .mic-button { min-width: 48px; width: 48px; }
-  .mic-button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+  .mic-button { min-width: 118px; width: auto; padding: 0 12px; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

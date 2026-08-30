@@ -450,6 +450,22 @@ export function TutorSession() {
 
   const minutes = Math.floor(secondsRemaining / 60).toString().padStart(2, "0");
   const seconds = (secondsRemaining % 60).toString().padStart(2, "0");
+  const voiceDock = (
+    <section className={`voice-dock voice-${voiceState} ${intakeState !== "confirmed" ? "intake-open" : ""}`} aria-label="Tutor voice controls">
+      <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : isRecording ? "Listening" : voiceCopy[voiceState].label}</strong><p>{sessionState === "ended" ? "Your question and transcript are still here." : errorMessage || (isRecording ? "Keep holding while you answer." : voiceCopy[voiceState].detail)}</p></div></div>
+      <div className="voice-instruction"><span>{sessionState === "active" && sessionId ? "Hold the button or Space while you speak" : "Start the session after confirming your crop"}</span></div>
+      <button
+        className={`mic-button ${isRecording ? "mic-on" : ""}`}
+        type="button"
+        onPointerDown={beginTalkPress}
+        onPointerUp={finishTalkPress}
+        onPointerCancel={finishTalkPress}
+        onContextMenu={(event) => event.preventDefault()}
+        disabled={sessionState !== "active" || !sessionId || voiceState !== "listening"}
+        aria-pressed={isRecording}
+      ><Icon name="mic" /><span>{isRecording ? "Release to send" : "Hold to talk"}</span></button>
+    </section>
+  );
 
   return (
     <main className="session-shell">
@@ -549,24 +565,14 @@ export function TutorSession() {
               />
             </section>
           </div>
-          <TranscriptPanel voiceState={voiceState} turns={learnerView?.turns ?? []} />
+          <div className="conversation-column">
+            <TranscriptPanel voiceState={voiceState} turns={learnerView?.turns ?? []} />
+            {voiceDock}
+          </div>
         </div>
       ) : null}
 
-      <section className={`voice-dock voice-${voiceState} ${intakeState !== "confirmed" ? "intake-open" : ""}`} aria-label="Tutor voice controls">
-        <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : isRecording ? "Listening" : voiceCopy[voiceState].label}</strong><p>{sessionState === "ended" ? "Your question and transcript are still here." : errorMessage || (isRecording ? "Keep holding while you answer." : voiceCopy[voiceState].detail)}</p></div></div>
-        <div className="voice-instruction"><span>{sessionState === "active" && sessionId ? "Hold the button or Space while you speak" : "Start the session after confirming your crop"}</span></div>
-        <button
-          className={`mic-button ${isRecording ? "mic-on" : ""}`}
-          type="button"
-          onPointerDown={beginTalkPress}
-          onPointerUp={finishTalkPress}
-          onPointerCancel={finishTalkPress}
-          onContextMenu={(event) => event.preventDefault()}
-          disabled={sessionState !== "active" || !sessionId || voiceState !== "listening"}
-          aria-pressed={isRecording}
-        ><Icon name="mic" /><span>{isRecording ? "Release to send" : "Hold to talk"}</span></button>
-      </section>
+      {intakeState !== "confirmed" && voiceDock}
     </main>
   );
 }
