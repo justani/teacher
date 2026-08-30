@@ -71,8 +71,26 @@ function Icon({ name }: { name: "upload" | "mic" | "stop" | "play" | "image" | "
 }
 
 function TranscriptPanel({ turns }: { turns: TranscriptTurn[] }) {
+  const panelRef = useRef<HTMLElement>(null);
+  const latestTurnId = turns[turns.length - 1]?._id;
+
+  useEffect(() => {
+    if (!latestTurnId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      panel.scrollTo({
+        top: panel.scrollHeight,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [latestTurnId]);
+
   return (
-    <aside className="transcript-panel" aria-labelledby="transcript-heading">
+    <aside ref={panelRef} className="transcript-panel" aria-labelledby="transcript-heading">
       <div className="transcript-heading">
         <div><p className="overline">Conversation</p><h2 id="transcript-heading">Session transcript</h2></div>
         <span className="transcript-live"><span aria-hidden="true" /> Live</span>
