@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
@@ -57,7 +58,7 @@ function logFrontendTiming(
   });
 }
 
-function Icon({ name }: { name: "upload" | "mic" | "stop" | "play" | "image" | "crop" | "reset" }) {
+function Icon({ name }: { name: "upload" | "mic" | "stop" | "play" | "image" | "crop" | "reset" | "send" }) {
   const paths = {
     upload: <><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M5 14v5h14v-5"/></>,
     mic: <><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0013 0M12 18v3M9 21h6"/></>,
@@ -66,21 +67,34 @@ function Icon({ name }: { name: "upload" | "mic" | "stop" | "play" | "image" | "
     image: <><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M3 16l5-4 4 3 3-2 6 5"/></>,
     crop: <><path d="M7 3v14a2 2 0 002 2h12M3 7h14a2 2 0 012 2v12"/></>,
     reset: <><path d="M4 9a8 8 0 111.4 7.6"/><path d="M4 4v5h5"/></>,
+    send: <><path d="M4 4l17 8-17 8 3-8-3-8z"/><path d="M7 12h14"/></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
 
-function TranscriptPanel({ turns }: { turns: TranscriptTurn[] }) {
-  const panelRef = useRef<HTMLElement>(null);
+function TranscriptPanel({
+  turns,
+  typedAnswer,
+  onTypedAnswerChange,
+  onTypedAnswerSubmit,
+  canType,
+}: {
+  turns: TranscriptTurn[];
+  typedAnswer: string;
+  onTypedAnswerChange: (value: string) => void;
+  onTypedAnswerSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  canType: boolean;
+}) {
+  const listRef = useRef<HTMLOListElement>(null);
   const latestTurnId = turns[turns.length - 1]?._id;
 
   useEffect(() => {
     if (!latestTurnId) return;
     const frame = window.requestAnimationFrame(() => {
-      const panel = panelRef.current;
-      if (!panel) return;
-      panel.scrollTo({
-        top: panel.scrollHeight,
+      const list = listRef.current;
+      if (!list) return;
+      list.scrollTo({
+        top: list.scrollHeight,
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
           ? "auto"
           : "smooth",
@@ -90,12 +104,12 @@ function TranscriptPanel({ turns }: { turns: TranscriptTurn[] }) {
   }, [latestTurnId]);
 
   return (
-    <aside ref={panelRef} className="transcript-panel" aria-labelledby="transcript-heading">
+    <aside className="transcript-panel" aria-labelledby="transcript-heading">
       <div className="transcript-heading">
         <div><p className="overline">Conversation</p><h2 id="transcript-heading">Session transcript</h2></div>
         <span className="transcript-live"><span aria-hidden="true" /> Live</span>
       </div>
-      <ol className="transcript-list">
+      <ol ref={listRef} className="transcript-list">
         {turns.map((entry) => (
           <li key={entry._id} className={entry.speaker === "tutor" ? "tutor-line" : "learner-line"}>
             <div><strong>{entry.speaker === "tutor" ? "Tutor" : "Student"}</strong><time>{new Date(entry._creationTime).toLocaleTimeString([], { minute: "2-digit", second: "2-digit" })}</time></div>
@@ -104,7 +118,25 @@ function TranscriptPanel({ turns }: { turns: TranscriptTurn[] }) {
         ))}
         {turns.length === 0 && <li className="transcript-empty"><p>The conversation will appear here when the tutor is ready.</p></li>}
       </ol>
-      <p className="transcript-note">Voice transcript appears here as the session continues.</p>
+      <form className="text-composer" onSubmit={onTypedAnswerSubmit}>
+        <label htmlFor="typed-answer">Write your answer</label>
+        <div>
+          <input
+            id="typed-answer"
+            type="text"
+            value={typedAnswer}
+            onChange={(event) => onTypedAnswerChange(event.target.value)}
+            placeholder={canType ? "Type what you’re thinking…" : "Available on your turn"}
+            maxLength={1200}
+            autoComplete="off"
+            disabled={!canType}
+          />
+          <button type="submit" aria-label="Send typed answer" disabled={!canType || typedAnswer.trim().length === 0}>
+            <Icon name="send" />
+          </button>
+        </div>
+        <p>Press Enter to send</p>
+      </form>
     </aside>
   );
 }
@@ -116,6 +148,7 @@ export function TutorSession() {
   const [isRecording, setIsRecording] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [typedAnswer, setTypedAnswer] = useState("");
   const [secondsRemaining, setSecondsRemaining] = useState(15 * 60);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
@@ -143,6 +176,7 @@ export function TutorSession() {
   const recordingStartedAtRef = useRef<number | null>(null);
   const startRecordingShortcutRef = useRef<() => void>(() => undefined);
   const stopRecordingShortcutRef = useRef<() => void>(() => undefined);
+  const textSubmissionActiveRef = useRef(false);
   const boardRef = useRef<SharedMathBoardHandle>(null);
 
   const generateUploadUrl = useMutation(api.tutorSessions.generateUploadUrl);
@@ -153,6 +187,7 @@ export function TutorSession() {
   const endTutorSession = useMutation(api.tutorSessions.end);
   const prepareTutor = useAction(api.tutorActions.prepare);
   const respondToAudio = useAction(api.tutorActions.respondToAudio);
+  const respondToText = useAction(api.tutorActions.respondToText);
   const generateDrawing = useAction(api.tutorActions.generateDrawing);
   const learnerView = useQuery(
     api.tutorSessions.getLearnerView,
@@ -443,8 +478,8 @@ export function TutorSession() {
         logFrontendTiming("opening_audio_failed", startedAt, { flow: "opening" });
         setErrorMessage(
           error instanceof Error
-            ? `${error.message} You can still press the mic and reply.`
-            : "Tutor audio could not play. You can still press the mic and reply.",
+            ? `${error.message} You can still press the mic or type your reply.`
+            : "Tutor audio could not play. You can still press the mic or type your reply.",
         );
         setVoiceState("listening");
       }
@@ -486,28 +521,83 @@ export function TutorSession() {
         boardImageId,
         boardSummary: checkpoint.summary,
       });
-      logFrontendTiming("tutor_text_ready", startedAt, { flow: "learner_turn" });
-      const speechPromise = speakTutorTurn(
-        result.speechChunks,
-        sessionId,
-        { flow: "learner_turn", startedAt },
-        false,
-      );
-      const drawingPromise = drawTutorTurn(
-        sessionId,
-        boardImageId,
-        checkpoint.summary,
-        result.tutorReply,
-        result.drawingDirection,
-      ).catch((error) => console.error("Could not draw tutor response", error));
-      const [speechOutcome] = await Promise.allSettled([speechPromise, drawingPromise]);
-      await finishPlayback({ sessionId }).catch(() => undefined);
-      setVoiceState("listening");
-      if (speechOutcome.status === "rejected") throw speechOutcome.reason;
+      await completeLearnerTurn(result, sessionId, boardImageId, checkpoint.summary, startedAt);
     } catch (error) {
       logFrontendTiming("learner_turn_failed", startedAt, { flow: "learner_turn" });
       setErrorMessage(error instanceof Error ? error.message : "I could not process that answer.");
       setVoiceState("listening");
+    }
+  }
+
+  async function completeLearnerTurn(
+    result: {
+      tutorReply: string;
+      drawingDirection: string;
+      speechChunks: Array<{ say: string; actions: BoardAction[] }>;
+    },
+    activeSessionId: Id<"tutorSessions">,
+    boardImageId: Id<"_storage"> | undefined,
+    boardSummary: string,
+    startedAt: number,
+  ) {
+    logFrontendTiming("tutor_text_ready", startedAt, { flow: "learner_turn" });
+    const speechPromise = speakTutorTurn(
+      result.speechChunks,
+      activeSessionId,
+      { flow: "learner_turn", startedAt },
+      false,
+    );
+    const drawingPromise = drawTutorTurn(
+      activeSessionId,
+      boardImageId,
+      boardSummary,
+      result.tutorReply,
+      result.drawingDirection,
+    ).catch((error) => console.error("Could not draw tutor response", error));
+    const [speechOutcome] = await Promise.allSettled([speechPromise, drawingPromise]);
+    await finishPlayback({ sessionId: activeSessionId }).catch(() => undefined);
+    setVoiceState("listening");
+    if (speechOutcome.status === "rejected") throw speechOutcome.reason;
+  }
+
+  async function submitTypedAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const text = typedAnswer.trim();
+    if (!text || !sessionId || !learnerCanAnswer || isRecording || textSubmissionActiveRef.current) return;
+    const startedAt = performance.now();
+    textSubmissionActiveRef.current = true;
+    setErrorMessage("");
+    setVoiceState("thinking");
+    logFrontendTiming("typed_response_started", startedAt, {
+      flow: "learner_turn",
+      characters: text.length,
+    });
+    try {
+      const checkpoint = await boardRef.current?.captureCheckpoint();
+      if (!checkpoint) throw new Error("The board is still loading. Please try again.");
+      await saveBoardCheckpoint({
+        sessionId,
+        actor: "learner",
+        revision: checkpoint.revision,
+        document: checkpoint.document,
+        summary: checkpoint.summary,
+      });
+      logFrontendTiming("board_checkpoint_saved", startedAt, { flow: "learner_turn" });
+      const boardImageId = checkpoint.image ? await uploadBlob(checkpoint.image) : undefined;
+      const result = await respondToText({
+        sessionId,
+        text,
+        boardImageId,
+        boardSummary: checkpoint.summary,
+      });
+      setTypedAnswer("");
+      await completeLearnerTurn(result, sessionId, boardImageId, checkpoint.summary, startedAt);
+    } catch (error) {
+      logFrontendTiming("learner_turn_failed", startedAt, { flow: "learner_turn" });
+      setErrorMessage(error instanceof Error ? error.message : "I could not process that answer.");
+      setVoiceState("listening");
+    } finally {
+      textSubmissionActiveRef.current = false;
     }
   }
 
@@ -762,7 +852,13 @@ export function TutorSession() {
             </section>
           </div>
           <div className="conversation-column">
-            <TranscriptPanel turns={learnerView?.turns ?? []} />
+            <TranscriptPanel
+              turns={learnerView?.turns ?? []}
+              typedAnswer={typedAnswer}
+              onTypedAnswerChange={setTypedAnswer}
+              onTypedAnswerSubmit={submitTypedAnswer}
+              canType={learnerCanAnswer && !isRecording}
+            />
             {voiceDock}
           </div>
         </div>

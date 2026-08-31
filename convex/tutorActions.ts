@@ -6,9 +6,9 @@ import { generateObject, generateText } from "ai";
 import { ConvexError, v } from "convex/values";
 import { z } from "zod";
 import { components, internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
-import { action, env } from "./_generated/server";
-import { boardAction } from "./schema";
+import type { Doc, Id } from "./_generated/dataModel";
+import { action, env, type ActionCtx } from "./_generated/server";
+import { boardAction, tutorSpeechChunk } from "./schema";
 import {
   buildDrawingPrompt,
   buildOpeningPrompt,
@@ -122,12 +122,19 @@ type TutorSpeechChunk = {
   say: string;
   actions: BoardAction[];
 };
-type RespondToAudioResult = {
+type RespondToLearnerResult = {
   transcript: string;
   tutorReply: string;
   drawingDirection: string;
   speechChunks: TutorSpeechChunk[];
 };
+
+const respondToLearnerResult = v.object({
+  transcript: v.string(),
+  tutorReply: v.string(),
+  drawingDirection: v.string(),
+  speechChunks: v.array(tutorSpeechChunk),
+});
 
 type BackendLatencyOutcome = "success" | "error";
 type BackendLatencyStage =
@@ -319,6 +326,94 @@ function sarvamErrorDetails(body: unknown): { code?: string; requestId?: string 
   };
 }
 
+async function generateTutorTurn(
+  ctx: ActionCtx,
+  session: Doc<"tutorSessions">,
+  args: {
+    sessionId: Id<"tutorSessions">;
+    preparation: NonNullable<Doc<"tutorSessions">["preparation"]>;
+    learnerText: string;
+    boardImageId?: Id<"_storage">;
+    boardSummary: string;
+  },
+): Promise<{ result: RespondToLearnerResult; boardImageCleanupScheduled: boolean }> {
+  await ctx.runMutation(internal.tutorSessions.saveTurn, {
+    sessionId: args.sessionId,
+    speaker: "learner",
+    text: args.learnerText,
+    nextStatus: "thinking",
+  });
+
+  if (args.boardSummary.length > 20_000) {
+    throw new ConvexError("The board summary is too large to understand safely.");
+  }
+  const boardImage = args.boardImageId
+    ? await ctx.storage.get(args.boardImageId)
+    : null;
+  const prompt = buildTurnPrompt(args.preparation, args.learnerText, args.boardSummary);
+  const boardImageBytes =
+    boardImage && boardImage.size <= 5 * 1024 * 1024
+      ? new Uint8Array(await boardImage.arrayBuffer())
+      : null;
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; image: Uint8Array; mediaType: string }
+  > = [{ type: "text", text: prompt }];
+  if (boardImage && boardImageBytes) {
+    content.push({
+      type: "image",
+      image: boardImageBytes,
+      mediaType: boardImage.type || "image/png",
+    });
+  }
+
+  const generated: { object: TutorTurnPlan } = await createTutorAgent().generateObject(
+    ctx,
+    { threadId: session.agentThreadId },
+    {
+      schema: tutorTurnSchema,
+      messages: [{ role: "user", content }],
+      maxOutputTokens: 512,
+      reasoning: "none",
+    },
+  );
+  const tutorReply = cleanTutorReply(generated.object.speech);
+  const drawingDirection = generated.object.drawingDirection.trim();
+  const speechChunks: TutorSpeechChunk[] = [{ say: tutorReply, actions: [] }];
+
+  await ctx.runMutation(internal.tutorSessions.saveTurn, {
+    sessionId: args.sessionId,
+    speaker: "tutor",
+    text: tutorReply,
+    nextStatus: "speaking",
+    speechChunks,
+  });
+
+  let boardImageCleanupScheduled = false;
+  if (args.boardImageId) {
+    try {
+      await ctx.scheduler.runAfter(
+        5 * 60 * 1000,
+        internal.tutorSessions.deleteStorageObject,
+        { storageId: args.boardImageId },
+      );
+      boardImageCleanupScheduled = true;
+    } catch (error) {
+      console.error("Could not schedule board image cleanup", error);
+    }
+  }
+
+  return {
+    result: {
+      transcript: args.learnerText,
+      tutorReply,
+      drawingDirection,
+      speechChunks,
+    },
+    boardImageCleanupScheduled,
+  };
+}
+
 export const prepare = action({
   args: { sessionId: v.id("tutorSessions") },
   returns: v.object({ problemText: v.string(), tutorReply: v.string() }),
@@ -486,30 +581,8 @@ export const respondToAudio = action({
     boardImageId: v.optional(v.id("_storage")),
     boardSummary: v.string(),
   },
-  returns: v.object({
-    transcript: v.string(),
-    tutorReply: v.string(),
-    drawingDirection: v.string(),
-    speechChunks: v.array(
-      v.object({
-        say: v.string(),
-        actions: v.array(
-          v.union(
-            v.object({ type: v.literal("addText"), text: v.string(), x: v.number(), y: v.number() }),
-            v.object({ type: v.literal("addArrow"), startX: v.number(), startY: v.number(), endX: v.number(), endY: v.number() }),
-            v.object({ type: v.literal("highlight"), x: v.number(), y: v.number(), width: v.number(), height: v.number() }),
-            v.object({ type: v.literal("crossOut"), startX: v.number(), startY: v.number(), endX: v.number(), endY: v.number() }),
-            v.object({ type: v.literal("addCircle"), x: v.number(), y: v.number(), width: v.number(), height: v.number() }),
-            v.object({ type: v.literal("addLine"), startX: v.number(), startY: v.number(), endX: v.number(), endY: v.number() }),
-            v.object({ type: v.literal("moveTutorShape"), targetId: v.string(), x: v.number(), y: v.number() }),
-            v.object({ type: v.literal("updateTutorText"), targetId: v.string(), text: v.string() }),
-            v.object({ type: v.literal("removeTutorShape"), targetId: v.string() }),
-          ),
-        ),
-      }),
-    ),
-  }),
-  handler: async (ctx, args): Promise<RespondToAudioResult> => {
+  returns: respondToLearnerResult,
+  handler: async (ctx, args): Promise<RespondToLearnerResult> => {
     const actionStartedAt = Date.now();
     let outcome: BackendLatencyOutcome = "error";
     let stage: BackendLatencyStage = "audio_load";
@@ -584,7 +657,7 @@ export const respondToAudio = action({
           retryable
             ? "Speech recognition is temporarily busy. Please try that answer once more."
             : sttResponse.status === 400 || sttResponse.status === 422
-              ? "I could not read that recording. Hold the mic for at least one second and try again."
+              ? "I could not read that recording. Press the mic, speak for at least one second, then press stop."
               : "Speech recognition could not process that answer. Please try again.",
         );
       }
@@ -601,80 +674,28 @@ export const respondToAudio = action({
 
       const transcript = body.transcript.trim();
       if (!transcript) {
-        throw new ConvexError("I could not hear an answer. Hold the button and try again.");
-      }
-
-      await ctx.runMutation(internal.tutorSessions.saveTurn, {
-        sessionId: args.sessionId,
-        speaker: "learner",
-        text: transcript,
-        nextStatus: "thinking",
-      });
-
-      if (args.boardSummary.length > 20_000) {
-        throw new ConvexError("The board summary is too large to understand safely.");
-      }
-      const boardImage = args.boardImageId
-        ? await ctx.storage.get(args.boardImageId)
-        : null;
-      const prompt = buildTurnPrompt(session.preparation, transcript, args.boardSummary);
-      const boardImageBytes =
-        boardImage && boardImage.size <= 5 * 1024 * 1024
-          ? new Uint8Array(await boardImage.arrayBuffer())
-          : null;
-      const content: Array<
-        | { type: "text"; text: string }
-        | { type: "image"; image: Uint8Array; mediaType: string }
-      > = [{ type: "text", text: prompt }];
-      if (boardImage && boardImageBytes) {
-        content.push({
-          type: "image",
-          image: boardImageBytes,
-          mediaType: boardImage.type || "image/png",
-        });
+        throw new ConvexError("I could not hear an answer. Press to talk and try again.");
       }
 
       stage = "tutor_generation";
       const tutorGenerationStartedAt = Date.now();
-      let turn: TutorTurnPlan;
+      let generated: Awaited<ReturnType<typeof generateTutorTurn>>;
       try {
-        const result: { object: TutorTurnPlan } = await createTutorAgent().generateObject(
-          ctx,
-          { threadId: session.agentThreadId },
-          {
-            schema: tutorTurnSchema,
-            messages: [{ role: "user", content }],
-            maxOutputTokens: 512,
-            reasoning: "none",
-          },
-        );
-        turn = result.object;
+        generated = await generateTutorTurn(ctx, session, {
+          sessionId: args.sessionId,
+          preparation: session.preparation,
+          learnerText: transcript,
+          boardImageId: args.boardImageId,
+          boardSummary: args.boardSummary,
+        });
       } finally {
         tutorGenerationMs = elapsedMs(tutorGenerationStartedAt);
       }
-      const tutorReply = cleanTutorReply(turn.speech);
-      const drawingDirection = turn.drawingDirection.trim();
-      const speechChunks: TutorSpeechChunk[] = [{ say: tutorReply, actions: [] }];
-
-      await ctx.runMutation(internal.tutorSessions.saveTurn, {
-        sessionId: args.sessionId,
-        speaker: "tutor",
-        text: tutorReply,
-        nextStatus: "speaking",
-        speechChunks,
-      });
 
       outcome = "success";
       stage = "complete";
-      if (args.boardImageId) {
-        boardImageHandedOff = true;
-        await ctx.scheduler
-          .runAfter(5 * 60 * 1000, internal.tutorSessions.deleteStorageObject, {
-            storageId: args.boardImageId,
-          })
-          .catch((error) => console.error("Could not schedule board image cleanup", error));
-      }
-      return { transcript, tutorReply, drawingDirection, speechChunks };
+      boardImageHandedOff = generated.boardImageCleanupScheduled;
+      return generated.result;
     } catch (error) {
       console.error("Tutor learner-turn processing failed", {
         stage,
@@ -712,6 +733,89 @@ export const respondToAudio = action({
           tutorGenerationMs,
         })
         .catch((error) => console.error("Could not store learner-turn latency", error));
+    }
+  },
+});
+
+export const respondToText = action({
+  args: {
+    sessionId: v.id("tutorSessions"),
+    text: v.string(),
+    boardImageId: v.optional(v.id("_storage")),
+    boardSummary: v.string(),
+  },
+  returns: respondToLearnerResult,
+  handler: async (ctx, args): Promise<RespondToLearnerResult> => {
+    const actionStartedAt = Date.now();
+    let outcome: BackendLatencyOutcome = "error";
+    let stage: BackendLatencyStage = "tutor_generation";
+    let tutorGenerationMs: number | undefined;
+    let boardImageHandedOff = false;
+    const learnerText = args.text.trim();
+    if (!learnerText) throw new ConvexError("Write an answer before sending.");
+    if (learnerText.length > 1_200) {
+      throw new ConvexError("Keep each typed answer under 1,200 characters.");
+    }
+
+    const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
+      internal.tutorSessions.getInternal,
+      { sessionId: args.sessionId },
+    );
+    if (!session?.preparation) throw new ConvexError("The tutor is not ready yet.");
+
+    await ctx.runMutation(internal.tutorSessions.markStatus, {
+      sessionId: args.sessionId,
+      status: "thinking",
+    });
+
+    try {
+      const tutorGenerationStartedAt = Date.now();
+      let generated: Awaited<ReturnType<typeof generateTutorTurn>>;
+      try {
+        generated = await generateTutorTurn(ctx, session, {
+          sessionId: args.sessionId,
+          preparation: session.preparation,
+          learnerText,
+          boardImageId: args.boardImageId,
+          boardSummary: args.boardSummary,
+        });
+      } finally {
+        tutorGenerationMs = elapsedMs(tutorGenerationStartedAt);
+      }
+      outcome = "success";
+      stage = "complete";
+      boardImageHandedOff = generated.boardImageCleanupScheduled;
+      return generated.result;
+    } catch (error) {
+      console.error("Tutor typed-turn processing failed", {
+        stage,
+        ...providerErrorMetadata(error),
+      });
+      const message = safeProviderMessage(error);
+      await ctx.runMutation(internal.tutorSessions.markStatus, {
+        sessionId: args.sessionId,
+        status: "error",
+        errorMessage: message,
+      });
+      throw new ConvexError(message);
+    } finally {
+      if (args.boardImageId && !boardImageHandedOff) {
+        await ctx
+          .runMutation(internal.tutorSessions.deleteStorageObject, {
+            storageId: args.boardImageId,
+          })
+          .catch((error) => console.error("Could not delete board image", error));
+      }
+      await ctx
+        .runMutation(internal.tutorSessions.recordBackendLatency, {
+          sessionId: args.sessionId,
+          flow: "learner_turn",
+          outcome,
+          stage,
+          totalMs: elapsedMs(actionStartedAt),
+          tutorGenerationMs,
+        })
+        .catch((error) => console.error("Could not store typed-turn latency", error));
     }
   },
 });
