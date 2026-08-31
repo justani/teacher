@@ -825,24 +825,43 @@ export const generateDrawing = action({
     sessionId: v.id("tutorSessions"),
     boardImageId: v.optional(v.id("_storage")),
     boardSummary: v.string(),
+    boardRevision: v.number(),
     speech: v.string(),
     drawingDirection: v.string(),
   },
-  returns: v.object({ actions: v.array(boardAction) }),
-  handler: async (ctx, args): Promise<{ actions: BoardAction[] }> => {
+  returns: v.object({
+    actions: v.array(boardAction),
+    sourceBoardRevision: v.number(),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ actions: BoardAction[]; sourceBoardRevision: number }> => {
     try {
-      const session: Doc<"tutorSessions"> | null = await ctx.runQuery(
-        internal.tutorSessions.getInternal,
+      const artistContext = await ctx.runQuery(
+        internal.tutorSessions.getArtistContext,
         { sessionId: args.sessionId },
       );
-      if (!session) throw new ConvexError("Session not found.");
+      if (!artistContext) throw new ConvexError("Session not found.");
       if (args.boardSummary.length > 20_000) {
         throw new ConvexError("The board summary is too large to understand safely.");
+      }
+      if (!Number.isSafeInteger(args.boardRevision) || args.boardRevision < 0) {
+        throw new ConvexError("The board revision is invalid.");
+      }
+      if (artistContext.boardRevision !== args.boardRevision) {
+        console.info("Skipped drawing for a stale board revision", {
+          requestedRevision: args.boardRevision,
+          currentRevision: artistContext.boardRevision,
+        });
+        return { actions: [], sourceBoardRevision: args.boardRevision };
       }
       if (args.speech.length > 480 || args.drawingDirection.length > 300) {
         throw new ConvexError("The drawing request is too large.");
       }
-      if (!args.drawingDirection.trim()) return { actions: [] };
+      if (!args.drawingDirection.trim()) {
+        return { actions: [], sourceBoardRevision: args.boardRevision };
+      }
 
       const boardImage = args.boardImageId
         ? await ctx.storage.get(args.boardImageId)
@@ -857,6 +876,8 @@ export const generateDrawing = action({
             args.drawingDirection,
             args.boardSummary,
             args.speech,
+            artistContext,
+            args.boardRevision,
           ),
         },
       ];
@@ -913,12 +934,21 @@ export const generateDrawing = action({
         actionCount: actions.length,
         actionTypes: actions.map((action) => action.type),
       });
-      return { actions };
+      if (actions.length > 0) {
+        await ctx.runMutation(internal.tutorSessions.saveVisualPlan, {
+          sessionId: args.sessionId,
+          sourceBoardRevision: args.boardRevision,
+          speech: args.speech,
+          drawingDirection: args.drawingDirection,
+          actions,
+        });
+      }
+      return { actions, sourceBoardRevision: args.boardRevision };
     } catch (error) {
       console.warn("Tutor drawing generation failed; continuing with speech", {
         ...providerErrorMetadata(error),
       });
-      return { actions: [] };
+      return { actions: [], sourceBoardRevision: args.boardRevision };
     } finally {
       if (args.boardImageId) {
         await ctx

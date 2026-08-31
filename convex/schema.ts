@@ -156,6 +156,13 @@ const schema = defineSchema({
     text: v.string(),
     speechChunks: v.optional(v.array(tutorSpeechChunk)),
   }).index("by_sessionId", ["sessionId"]),
+  tutorVisualPlans: defineTable({
+    sessionId: v.id("tutorSessions"),
+    sourceBoardRevision: v.number(),
+    speech: v.string(),
+    drawingDirection: v.string(),
+    actions: v.array(boardAction),
+  }).index("by_sessionId", ["sessionId"]),
   boardCheckpoints: defineTable({
     sessionId: v.id("tutorSessions"),
     actor: v.union(v.literal("learner"), v.literal("tutor")),

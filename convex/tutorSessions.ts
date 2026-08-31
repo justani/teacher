@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { components } from "./_generated/api";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import schema, {
+  boardAction,
   latencyFlow,
   latencyOutcome,
   latencyStage,
@@ -92,6 +93,64 @@ export const getInternal = internalQuery({
   args: { sessionId: v.id("tutorSessions") },
   returns: v.union(v.null(), schema.doc("tutorSessions")),
   handler: async (ctx, args) => ctx.db.get("tutorSessions", args.sessionId),
+});
+
+export const getArtistContext = internalQuery({
+  args: { sessionId: v.id("tutorSessions") },
+  returns: v.union(
+    v.null(),
+    v.object({
+      problemText: v.string(),
+      boardRevision: v.optional(v.number()),
+      turns: v.array(
+        v.object({
+          speaker: v.union(v.literal("learner"), v.literal("tutor")),
+          text: v.string(),
+        }),
+      ),
+      recentVisualPlans: v.array(
+        v.object({
+          sourceBoardRevision: v.number(),
+          speech: v.string(),
+          drawingDirection: v.string(),
+          actions: v.array(boardAction),
+        }),
+      ),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get("tutorSessions", args.sessionId);
+    if (!session) return null;
+
+    const [turnsDescending, plansDescending] = await Promise.all([
+      ctx.db
+        .query("tutorTurns")
+        .withIndex("by_sessionId", (q) => q.eq("sessionId", args.sessionId))
+        .order("desc")
+        .take(60),
+      ctx.db
+        .query("tutorVisualPlans")
+        .withIndex("by_sessionId", (q) => q.eq("sessionId", args.sessionId))
+        .order("desc")
+        .take(4),
+    ]);
+
+    return {
+      problemText: session.problemText ?? "The problem text is not available.",
+      boardRevision: session.boardRevision,
+      turns: turnsDescending
+        .reverse()
+        .map(({ speaker, text }) => ({ speaker, text })),
+      recentVisualPlans: plansDescending
+        .reverse()
+        .map(({ sourceBoardRevision, speech, drawingDirection, actions }) => ({
+          sourceBoardRevision,
+          speech,
+          drawingDirection,
+          actions,
+        })),
+    };
+  },
 });
 
 export const saveBoardCheckpoint = mutation({
@@ -187,6 +246,25 @@ export const saveTurn = internalMutation({
       errorMessage: undefined,
     });
     return turnId;
+  },
+});
+
+export const saveVisualPlan = internalMutation({
+  args: {
+    sessionId: v.id("tutorSessions"),
+    sourceBoardRevision: v.number(),
+    speech: v.string(),
+    drawingDirection: v.string(),
+    actions: v.array(boardAction),
+  },
+  returns: v.id("tutorVisualPlans"),
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get("tutorSessions", args.sessionId);
+    if (!session) throw new Error("Session not found.");
+    if (args.actions.length === 0 || args.actions.length > 6) {
+      throw new Error("A visual plan must contain between one and six actions.");
+    }
+    return ctx.db.insert("tutorVisualPlans", args);
   },
 });
 

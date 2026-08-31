@@ -414,6 +414,7 @@ export function TutorSession() {
     activeSessionId: Id<"tutorSessions">,
     boardImageId: Id<"_storage"> | undefined,
     boardSummary: string,
+    boardRevision: number,
     speech: string,
     drawingDirection: string,
   ) {
@@ -424,12 +425,17 @@ export function TutorSession() {
         sessionId: activeSessionId,
         boardImageId,
         boardSummary,
+        boardRevision,
         speech,
         drawingDirection,
       });
       if (result.actions.length === 0) return;
 
-      boardRef.current?.applyTutorActions(result.actions);
+      const applied = boardRef.current?.applyTutorActions(
+        result.actions,
+        result.sourceBoardRevision,
+      );
+      if (!applied) return;
       const checkpoint = await boardRef.current?.captureCheckpoint();
       if (!checkpoint) return;
       await saveBoardCheckpoint({
@@ -521,7 +527,14 @@ export function TutorSession() {
         boardImageId,
         boardSummary: checkpoint.summary,
       });
-      await completeLearnerTurn(result, sessionId, boardImageId, checkpoint.summary, startedAt);
+      await completeLearnerTurn(
+        result,
+        sessionId,
+        boardImageId,
+        checkpoint.summary,
+        checkpoint.revision,
+        startedAt,
+      );
     } catch (error) {
       logFrontendTiming("learner_turn_failed", startedAt, { flow: "learner_turn" });
       setErrorMessage(error instanceof Error ? error.message : "I could not process that answer.");
@@ -538,6 +551,7 @@ export function TutorSession() {
     activeSessionId: Id<"tutorSessions">,
     boardImageId: Id<"_storage"> | undefined,
     boardSummary: string,
+    boardRevision: number,
     startedAt: number,
   ) {
     logFrontendTiming("tutor_text_ready", startedAt, { flow: "learner_turn" });
@@ -551,6 +565,7 @@ export function TutorSession() {
       activeSessionId,
       boardImageId,
       boardSummary,
+      boardRevision,
       result.tutorReply,
       result.drawingDirection,
     ).catch((error) => console.error("Could not draw tutor response", error));
@@ -591,7 +606,14 @@ export function TutorSession() {
         boardSummary: checkpoint.summary,
       });
       setTypedAnswer("");
-      await completeLearnerTurn(result, sessionId, boardImageId, checkpoint.summary, startedAt);
+      await completeLearnerTurn(
+        result,
+        sessionId,
+        boardImageId,
+        checkpoint.summary,
+        checkpoint.revision,
+        startedAt,
+      );
     } catch (error) {
       logFrontendTiming("learner_turn_failed", startedAt, { flow: "learner_turn" });
       setErrorMessage(error instanceof Error ? error.message : "I could not process that answer.");

@@ -37,7 +37,7 @@ export type BoardCheckpoint = {
 
 export type SharedMathBoardHandle = {
   captureCheckpoint: () => Promise<BoardCheckpoint | null>;
-  applyTutorActions: (actions: BoardAction[]) => void;
+  applyTutorActions: (actions: BoardAction[], expectedRevision?: number) => boolean;
 };
 
 type BoardTool = "draw" | "eraser" | "select";
@@ -134,8 +134,14 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
         revisionRef.current += 1;
         return { document, summary, image, revision: revisionRef.current };
       },
-      applyTutorActions(actions) {
-        if (!editor || actions.length === 0) return;
+      applyTutorActions(actions, expectedRevision) {
+        if (!editor || actions.length === 0) return false;
+        if (
+          expectedRevision !== undefined &&
+          revisionRef.current !== expectedRevision
+        ) {
+          return false;
+        }
         const viewport = editor.getViewportPageBounds();
         const point = (x: number, y: number) => ({
           x: viewport.x + clamp01(x) * viewport.w,
@@ -143,6 +149,7 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
         });
 
         const wasReadonly = editor.getIsReadonly();
+        let appliedCount = 0;
         if (wasReadonly) editor.updateInstanceState({ isReadonly: false });
 
         try {
@@ -164,14 +171,17 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
                     x: location.x,
                     y: location.y,
                   });
+                  appliedCount += 1;
                 } else if (action.type === "updateTutorText" && target.type === "text") {
                   editor.updateShape({
                     id: target.id,
                     type: "text",
                     props: { richText: toRichText(action.text) },
                   });
+                  appliedCount += 1;
                 } else if (action.type === "removeTutorShape") {
                   editor.deleteShape(target.id);
+                  appliedCount += 1;
                 }
                 continue;
               }
@@ -191,6 +201,7 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
                     size: "m",
                   },
                 });
+                appliedCount += 1;
                 continue;
               }
 
@@ -211,6 +222,7 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
                     dash: "draw",
                   },
                 });
+                appliedCount += 1;
                 continue;
               }
 
@@ -232,6 +244,7 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
                     dash: "draw",
                   },
                 });
+                appliedCount += 1;
                 continue;
               }
 
@@ -255,12 +268,16 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
                       : "arrow",
                 },
               });
+              appliedCount += 1;
             }
           });
         } finally {
           if (wasReadonly) editor.updateInstanceState({ isReadonly: true });
         }
-        setHasContent(editor.getCurrentPageShapes().length > 0);
+        if (appliedCount > 0) {
+          setHasContent(editor.getCurrentPageShapes().length > 0);
+        }
+        return appliedCount > 0;
       },
     }), [editor]);
 
