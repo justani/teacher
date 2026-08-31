@@ -2,7 +2,7 @@
 
 import { Agent } from "@convex-dev/agent";
 import { createVertex } from "@ai-sdk/google-vertex";
-import { generateObject, generateText } from "ai";
+import { generateObject, generateText, NoObjectGeneratedError } from "ai";
 import { ConvexError, v } from "convex/values";
 import { z } from "zod";
 import { components, internal } from "./_generated/api";
@@ -110,7 +110,7 @@ const tutorTurnSchema = z.object({
     .describe("The complete short Hinglish reply to speak to the learner."),
   drawingDirection: z
     .string()
-    .max(300)
+    .max(600)
     .describe(
       "A plain-language direction for a separate board artist. Return an empty string when no drawing helps.",
     ),
@@ -147,6 +147,7 @@ type BackendLatencyStage =
   | "complete";
 
 const OPENING_OUTPUT_TOKENS = 1024;
+const TUTOR_TURN_OUTPUT_TOKENS = 1024;
 const MAX_DRAWING_ACTIONS = 6;
 
 function openingGenerationOptions(prompt: string) {
@@ -301,6 +302,15 @@ function providerErrorMetadata(error: unknown) {
     typeof error.statusCode === "number"
       ? error.statusCode
       : undefined;
+  if (NoObjectGeneratedError.isInstance(error)) {
+    return {
+      errorName: error.name,
+      statusCode,
+      finishReason: error.finishReason,
+      outputCharacters: error.text?.length,
+      causeName: error.cause instanceof Error ? error.cause.name : undefined,
+    };
+  }
   return { errorName: error.name, statusCode };
 }
 
@@ -347,10 +357,20 @@ async function generateTutorTurn(
   if (args.boardSummary.length > 20_000) {
     throw new ConvexError("The board summary is too large to understand safely.");
   }
+  const visibleContext = await ctx.runQuery(
+    internal.tutorSessions.getArtistContext,
+    { sessionId: args.sessionId },
+  );
+  if (!visibleContext) throw new ConvexError("Session not found.");
   const boardImage = args.boardImageId
     ? await ctx.storage.get(args.boardImageId)
     : null;
-  const prompt = buildTurnPrompt(args.preparation, args.learnerText, args.boardSummary);
+  const prompt = buildTurnPrompt(
+    args.preparation,
+    args.learnerText,
+    args.boardSummary,
+    visibleContext.turns,
+  );
   const boardImageBytes =
     boardImage && boardImage.size <= 5 * 1024 * 1024
       ? new Uint8Array(await boardImage.arrayBuffer())
@@ -367,16 +387,50 @@ async function generateTutorTurn(
     });
   }
 
-  const generated: { object: TutorTurnPlan } = await createTutorAgent().generateObject(
-    ctx,
-    { threadId: session.agentThreadId },
-    {
-      schema: tutorTurnSchema,
-      messages: [{ role: "user", content }],
-      maxOutputTokens: 512,
-      reasoning: "none",
-    },
-  );
+  const tutorAgent = createTutorAgent();
+  const generationOptions = {
+    contextOptions: { recentMessages: 0 },
+    storageOptions: { saveMessages: "none" as const },
+  };
+  let generated: { object: TutorTurnPlan };
+  try {
+    generated = await tutorAgent.generateObject(
+      ctx,
+      { threadId: session.agentThreadId },
+      {
+        schema: tutorTurnSchema,
+        messages: [{ role: "user", content }],
+        maxOutputTokens: TUTOR_TURN_OUTPUT_TOKENS,
+        reasoning: "none",
+      },
+      generationOptions,
+    );
+  } catch (error) {
+    if (!NoObjectGeneratedError.isInstance(error)) throw error;
+    console.warn("Tutor turn output was malformed; retrying", providerErrorMetadata(error));
+    generated = await tutorAgent.generateObject(
+      ctx,
+      { threadId: session.agentThreadId },
+      {
+        schema: tutorTurnSchema,
+        messages: [
+          {
+            role: "user",
+            content: [
+              ...content,
+              {
+                type: "text",
+                text: "Return one valid object only. speech must be one or two short Hinglish sentences. drawingDirection must be a plain-English string under 600 characters, or an empty string. Do not add any other fields or prose.",
+              },
+            ],
+          },
+        ],
+        maxOutputTokens: TUTOR_TURN_OUTPUT_TOKENS,
+        reasoning: "none",
+      },
+      generationOptions,
+    );
+  }
   const tutorReply = cleanTutorReply(generated.object.speech);
   const drawingDirection = generated.object.drawingDirection.trim();
   const speechChunks: TutorSpeechChunk[] = [{ say: tutorReply, actions: [] }];
@@ -856,7 +910,7 @@ export const generateDrawing = action({
         });
         return { actions: [], sourceBoardRevision: args.boardRevision };
       }
-      if (args.speech.length > 480 || args.drawingDirection.length > 300) {
+      if (args.speech.length > 480 || args.drawingDirection.length > 600) {
         throw new ConvexError("The drawing request is too large.");
       }
       if (!args.drawingDirection.trim()) {

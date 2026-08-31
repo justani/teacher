@@ -47,8 +47,13 @@ export function buildTurnPrompt(
   preparation: Preparation,
   transcript: string,
   boardSummary?: string,
+  visibleTurns: Array<{ speaker: "learner" | "tutor"; text: string }> = [],
 ) {
   return `${privateReference(preparation)}
+
+<learner_visible_conversation>
+${JSON.stringify(visibleTurns)}
+</learner_visible_conversation>
 
 <latest_learner_transcript>
 ${transcript}
@@ -58,7 +63,7 @@ ${transcript}
 ${boardSummary || "The learner has not added anything to the board yet."}
 </current_board>
 
-Respond with exactly two outputs: speech and drawingDirection. Speech is the complete, short reply to the learner and asks at most one question. DrawingDirection is a concise plain-English brief for a separate board artist. Say what to add or change, what existing work to preserve, and anything the visual must not reveal. Use an empty string when no visual mark would make this specific reply clearer. Do not write coordinates or board-action JSON. Do not complete the learner's work or mention the private preparation.`;
+Respond with exactly two outputs: speech and drawingDirection. Speech is the complete, short reply to the learner and asks at most one question. DrawingDirection is a concise plain-English brief for a separate board artist. Say what to add or change, what existing work to preserve, and anything the visual must not reveal. Keep it under 600 characters and use an empty string when no visual mark would make this specific reply clearer. Do not write coordinates or board-action JSON. Do not complete the learner's work or mention the private preparation.`;
 }
 
 export function buildDrawingPrompt(
