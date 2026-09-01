@@ -11,6 +11,7 @@ import schema, {
   sessionStatus,
   tutorSpeechChunk,
 } from "./schema";
+import { MAX_BOARD_SUMMARY_CHARACTERS } from "./tutorPrompt";
 
 const optionalDuration = v.optional(v.number());
 
@@ -166,7 +167,9 @@ export const saveBoardCheckpoint = mutation({
     const session = await ctx.db.get("tutorSessions", args.sessionId);
     if (!session) throw new Error("Session not found.");
     if (args.document.length > 450_000) throw new Error("The board is too large to save.");
-    if (args.summary.length > 20_000) throw new Error("The board summary is too large to save.");
+    if (args.summary.length > MAX_BOARD_SUMMARY_CHARACTERS) {
+      throw new Error("The board summary is too large to save.");
+    }
     if ((session.boardRevision ?? -1) >= args.revision) {
       throw new Error("This board checkpoint is older than the saved board.");
     }

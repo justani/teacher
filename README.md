@@ -25,6 +25,19 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Local AI drawing playground
+
+Add `OPENAI_API_KEY` to `.env.local` alongside the existing Google credentials,
+then open [http://localhost:3000/drawing-playground](http://localhost:3000/drawing-playground).
+The playground compares Gemini 3.7 Flash, GPT-5.6 Luna, and GPT-5.6 Terra against
+the same board snapshot and 24-command production drawing protocol. Semantic point,
+segment, circumcircle, circle-centre, and angle commands let the renderer calculate
+exact geometry instead of asking the model to estimate it. New shapes receive short
+per-response references so later commands can style, resize, rotate, or group them.
+Board state and run history
+live only in the browser tab; refreshing the page resets both. The route is unavailable
+in production unless `DRAWING_PLAYGROUND_ENABLED=true` is set explicitly.
+
 ## Checks
 
 ```bash
