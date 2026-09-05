@@ -101,6 +101,7 @@ type BoardTool = "draw" | "eraser" | "select";
 type SharedMathBoardProps = {
   editable: boolean;
   isDrawing?: boolean;
+  statusLabel?: string;
   initialDocument?: string;
   initialRevision?: number;
 };
@@ -292,7 +293,7 @@ function summarizeBoard(editor: Editor) {
 }
 
 export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoardProps>(
-  function SharedMathBoard({ editable, isDrawing = false, initialDocument, initialRevision = 0 }, ref) {
+  function SharedMathBoard({ editable, isDrawing = false, statusLabel, initialDocument, initialRevision = 0 }, ref) {
     const [editor, setEditor] = useState<Editor | null>(null);
     const [activeTool, setActiveTool] = useState<BoardTool>("draw");
     const [hasContent, setHasContent] = useState(false);
@@ -964,6 +965,8 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
 
               if (action.type === "addCircle") {
                 const location = point(action.x, action.y);
+                // The normalized box can be rectangular; a circle needs equal page dimensions.
+                const diameter = Math.max(48, Math.min(action.width * viewport.w, action.height * viewport.h));
                 const shapeId = createShapeId();
                 editor.createShape({
                   id: shapeId,
@@ -973,8 +976,8 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
                   meta: { actor: "tutor" },
                   props: {
                     geo: "ellipse",
-                    w: Math.max(48, action.width * viewport.w),
-                    h: Math.max(48, action.height * viewport.h),
+                    w: diameter,
+                    h: diameter,
                     color: "green",
                     fill: "none",
                     dash: "draw",
@@ -1109,12 +1112,15 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
           <button type="button" className="board-undo" onClick={handleUndo} disabled={!editable || !hasContent}>
             <span aria-hidden="true">↶</span> Undo
           </button>
+          <button type="button" onClick={() => editor?.zoomToFit()} disabled={!hasContent || isDrawing} aria-label="Fit drawing in view">
+            Fit drawing
+          </button>
           <span
             className={`board-turn-pill ${editable ? "learner-turn" : "tutor-turn"} ${isDrawing ? "drawing-turn" : ""}`}
             role="status"
             aria-live="polite"
           >
-            <span aria-hidden="true" /> {isDrawing ? "Tutor is drawing…" : editable ? "Your turn" : "Tutor is using the board"}
+            <span aria-hidden="true" /> {statusLabel ?? (isDrawing ? "Tutor is drawing…" : editable ? "Your turn" : "Tutor is using the board")}
           </span>
         </div>
         <div className="math-board-canvas">
@@ -1132,8 +1138,8 @@ export const SharedMathBoard = forwardRef<SharedMathBoardHandle, SharedMathBoard
           />
           {!hasContent && (
             <div className="board-empty-hint" aria-hidden="true">
-              <span>Start your working here</span>
-              <p>Write a formula, draw the diagram, or mark what you know.</p>
+              <span>{editable ? "Start your working here" : "Your shared working space"}</span>
+              <p>{editable ? "Write a formula, draw the diagram, or mark what you know." : "Diagrams, formulas, and steps from your session appear here."}</p>
             </div>
           )}
           {!editable && <div className="board-lock-scrim" aria-hidden="true" />}

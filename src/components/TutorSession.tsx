@@ -89,12 +89,16 @@ function TranscriptPanel({
   onTypedAnswerChange,
   onTypedAnswerSubmit,
   canType,
+  sessionState,
+  isPreparing,
 }: {
   turns: TranscriptTurn[];
   typedAnswer: string;
   onTypedAnswerChange: (value: string) => void;
   onTypedAnswerSubmit: (event: FormEvent<HTMLFormElement>) => void;
   canType: boolean;
+  sessionState: SessionState;
+  isPreparing: boolean;
 }) {
   const listRef = useRef<HTMLOListElement>(null);
   const latestTurnId = turns[turns.length - 1]?._id;
@@ -119,7 +123,7 @@ function TranscriptPanel({
     <aside className="transcript-panel" aria-labelledby="transcript-heading">
       <div className="transcript-heading">
         <div><p className="overline">Conversation</p><h2 id="transcript-heading">Session transcript</h2></div>
-        <span className="transcript-live"><span aria-hidden="true" /> Live</span>
+        {sessionState === "active" ? <span className="transcript-live"><span aria-hidden="true" /> Live</span> : <span className="transcript-status">{sessionState === "ended" ? "Ended" : isPreparing ? "Preparing" : "Not started"}</span>}
       </div>
       <ol ref={listRef} className="transcript-list">
         {turns.map((entry) => (
@@ -791,13 +795,18 @@ export function TutorSession() {
   const minutes = Math.floor(secondsRemaining / 60).toString().padStart(2, "0");
   const seconds = (secondsRemaining % 60).toString().padStart(2, "0");
   const learnerCanAnswer = sessionState === "active" && Boolean(sessionId) && voiceState === "listening" && !isPreparing;
+  const visibleError = errorMessage.includes("[CONVEX")
+    ? sessionState === "ready"
+      ? "The tutor couldn’t start. Use Retry session to try again."
+      : "The tutor couldn’t respond. Try sending your answer again."
+    : errorMessage;
   const voiceDetail = sessionState === "ended"
     ? "Your question and transcript are still here."
-    : errorMessage || (isRecording ? "Speak naturally, then press stop when you’re done." : voiceCopy[voiceState].detail);
+    : visibleError || (isRecording ? "Speak naturally, then press stop when you’re done." : voiceCopy[voiceState].detail);
   const voiceDock = (
-    <section className={`voice-dock voice-${voiceState} ${learnerCanAnswer ? "ready-to-speak" : ""} ${intakeState !== "confirmed" ? "intake-open" : ""}`} aria-label="Tutor voice controls">
-      <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : isRecording ? "Listening" : voiceCopy[voiceState].label}</strong>{voiceDetail && <p>{voiceDetail}</p>}</div></div>
-      <div className="voice-instruction"><span>{learnerCanAnswer ? "Your turn — press the button or Space to talk, then press again to stop" : isPreparing ? "Reading the question and preparing your tutor…" : voiceState === "speaking" ? "Listen to the tutor, then it will be your turn" : "The tutor is getting the next question ready"}</span></div>
+    <section className={`voice-dock voice-${voiceState} ${learnerCanAnswer ? "ready-to-speak" : ""} ${errorMessage && sessionState !== "ended" ? "voice-error" : ""}`} aria-label="Tutor voice controls">
+      <div className="voice-presence" aria-live="polite"><span className="voice-orbit" aria-hidden="true"><span /></span><div><strong>{sessionState === "ended" ? "Session ended" : errorMessage ? sessionState === "ready" ? "Couldn’t start the session" : "Something went wrong" : isRecording ? "Listening" : voiceCopy[voiceState].label}</strong>{voiceDetail && <p>{voiceDetail}</p>}</div></div>
+      {sessionState === "active" && !errorMessage && <div className="voice-instruction"><span>{learnerCanAnswer ? "Your turn — press the button or Space to talk, then press again to stop" : isPreparing ? "Reading the question and preparing your tutor…" : voiceState === "speaking" ? "Listen to the tutor, then it will be your turn" : "The tutor is getting the next question ready"}</span></div>}
       <button
         className={`mic-button ${isRecording ? "mic-on" : ""}`}
         type="button"
@@ -829,7 +838,7 @@ export function TutorSession() {
               onPointerMove={updateCropInteraction}
               onPointerUp={finishCropInteraction}
               onPointerCancel={finishCropInteraction}
-              role="img"
+              role="group"
               aria-label="Selected rectangular crop area"
             >
               {(["nw", "ne", "sw", "se"] as CropMode[]).map((mode) => <button key={mode} type="button" className={`crop-handle handle-${mode}`} aria-label={`Resize crop from ${mode} corner`} onPointerDown={(event) => { event.stopPropagation(); beginCropInteraction(event, mode); }} onPointerMove={updateCropInteraction} onPointerUp={finishCropInteraction} onPointerCancel={finishCropInteraction} />)}
@@ -839,6 +848,7 @@ export function TutorSession() {
         </div>
 
         <footer className="crop-focus-actions">
+          <button className="button button-quiet crop-back" type="button" onClick={() => setIntakeState(croppedUrl ? "confirmed" : "upload")}>Back</button>
           <button className="button button-quiet" type="button" onClick={() => setCrop(DEFAULT_CROP)}><Icon name="reset" />Reset</button>
           <button className="button button-primary" type="button" onClick={confirmCrop}><Icon name="crop" />Use this crop</button>
         </footer>
@@ -911,6 +921,7 @@ export function TutorSession() {
                 ref={boardRef}
                 editable={sessionState === "active" && voiceState === "listening" && !isRecording}
                 isDrawing={isDrawing}
+                statusLabel={isPreparing ? "Preparing tutor…" : sessionState === "ended" ? "Session ended" : sessionState === "ready" ? "Session not started" : undefined}
                 initialDocument={learnerView?.latestBoardDocument}
                 initialRevision={learnerView?.boardRevision}
               />
@@ -923,13 +934,14 @@ export function TutorSession() {
               onTypedAnswerChange={setTypedAnswer}
               onTypedAnswerSubmit={submitTypedAnswer}
               canType={learnerCanAnswer && !isRecording}
+              sessionState={sessionState}
+              isPreparing={isPreparing}
             />
             {voiceDock}
           </div>
         </div>
       ) : null}
 
-      {intakeState !== "confirmed" && voiceDock}
     </main>
   );
 }
