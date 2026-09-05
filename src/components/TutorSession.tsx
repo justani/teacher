@@ -10,6 +10,7 @@ import {
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import Image from "next/image";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -35,6 +36,13 @@ type ResponseTiming = { flow: "opening" | "learner_turn"; startedAt: number };
 
 const DEFAULT_CROP: CropSelection = { x: 8, y: 18, width: 84, height: 38 };
 const MIN_CROP_PERCENT = 6;
+const SAMPLE_PROBLEMS = [
+  { id: "fractions", grade: 5, topic: "Adding fractions", question: "Add the fractions: 1/4 + 2/4 = ?" },
+  { id: "area", grade: 6, topic: "Area of a rectangle", question: "A rectangle is 8 cm long and 5 cm wide. What is its area?" },
+  { id: "percentages", grade: 7, topic: "Everyday percentages", question: "A bag costs Rs 200. It is on sale at 10% off. What is the sale price?" },
+  { id: "equations", grade: 8, topic: "Solving an equation", question: "Find the value of x: 3x + 5 = 20." },
+] as const;
+type SampleProblem = (typeof SAMPLE_PROBLEMS)[number];
 
 const voiceCopy: Record<VoiceState, { label: string; detail: string }> = {
   listening: { label: "Your turn", detail: "" },
@@ -141,6 +149,23 @@ function TranscriptPanel({
   );
 }
 
+function SampleGallery({ onSelect, disabled }: { onSelect: (sample: SampleProblem) => void; disabled: boolean }) {
+  return (
+    <section className="board-panel sample-panel" aria-labelledby="samples-heading">
+      <div className="board-heading"><div><p className="overline">No photo handy?</p><h2 id="samples-heading">Try a sample question</h2></div></div>
+      <p className="sample-intro">Pick a photo to start learning with your tutor. Easy questions for Grades 5–8.</p>
+      <div className="sample-grid">
+        {SAMPLE_PROBLEMS.map((sample) => (
+          <button key={sample.id} className="sample-card" type="button" onClick={() => onSelect(sample)} disabled={disabled} aria-label={`Start Grade ${sample.grade}: ${sample.topic}. ${sample.question}`}>
+            <Image src={`/samples/${sample.id}.png`} alt={sample.question} width={1536} height={1024} sizes="(max-width: 620px) 45vw, (max-width: 960px) 350px, 460px" />
+            <span className="sample-card-caption"><span><span className="overline">Grade {sample.grade}</span><strong>{sample.topic}</strong></span><span className="sample-start" aria-hidden="true"><Icon name="play" /></span></span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function TutorSession() {
   const [sessionState, setSessionState] = useState<SessionState>("ready");
   const [intakeState, setIntakeState] = useState<IntakeState>("upload");
@@ -153,6 +178,7 @@ export function TutorSession() {
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
+  const [sampleProblem, setSampleProblem] = useState<SampleProblem | null>(null);
   const [crop, setCrop] = useState<CropSelection>(DEFAULT_CROP);
   const [sessionId, setSessionId] = useState<Id<"tutorSessions"> | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
@@ -217,6 +243,7 @@ export function TutorSession() {
     setSourceUrl(URL.createObjectURL(file));
     setCroppedUrl(null);
     setFileName(file.name);
+    setSampleProblem(null);
     setCrop(DEFAULT_CROP);
     setIntakeState("crop");
     setSessionState("ready");
@@ -224,6 +251,22 @@ export function TutorSession() {
     setErrorMessage("");
     setSecondsRemaining(15 * 60);
     event.target.value = "";
+  }
+
+  function handleStartSample(sample: SampleProblem) {
+    if (isPreparing || sessionState === "active") return;
+    const imageUrl = `/samples/${sample.id}.png`;
+    const sampleFileName = `grade-${sample.grade}-${sample.id}.png`;
+    setSampleProblem(sample);
+    setSourceUrl(imageUrl);
+    setCroppedUrl(imageUrl);
+    setFileName(sampleFileName);
+    setCrop({ x: 0, y: 0, width: 100, height: 100 });
+    setIntakeState("confirmed");
+    setSessionState("ready");
+    setSessionId(null);
+    setSecondsRemaining(15 * 60);
+    void startSession(imageUrl, sampleFileName);
   }
 
   function beginCropInteraction(event: ReactPointerEvent<HTMLElement>, mode: CropMode) {
@@ -450,7 +493,7 @@ export function TutorSession() {
     }
   }
 
-  async function startSession(problemImageUrl = croppedUrl) {
+  async function startSession(problemImageUrl = croppedUrl, sourceFileName = fileName) {
     if (!problemImageUrl || sessionState === "active" || isPreparing) return;
     const startedAt = performance.now();
     logFrontendTiming("opening_started", startedAt, { flow: "opening" });
@@ -461,12 +504,14 @@ export function TutorSession() {
 
     try {
       await getAudioContext().resume();
-      const imageBlob = await fetch(problemImageUrl).then((response) => response.blob());
+      const imageResponse = await fetch(problemImageUrl);
+      if (!imageResponse.ok) throw new Error("The question photo could not be loaded. Please try again.");
+      const imageBlob = await imageResponse.blob();
       const problemImageId = await uploadBlob(imageBlob);
       logFrontendTiming("problem_image_uploaded", startedAt, { flow: "opening" });
       const newSessionId = await createTutorSession({
         problemImageId,
-        sourceFileName: fileName || "problem.jpg",
+        sourceFileName: sourceFileName || "problem.jpg",
       });
       setSessionId(newSessionId);
       logFrontendTiming("session_created", startedAt, { flow: "opening" });
@@ -802,12 +847,12 @@ export function TutorSession() {
       <header className="session-header">
         <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">∠</span><div><span className="brand-name">Axiom</span><span className="brand-context">Personal maths session</span></div></div>
         <div className="session-guidance">
-          <p className="overline">Class 9 · Circles</p>
+          <p className="overline">{sampleProblem ? `Grade ${sampleProblem.grade} · ${sampleProblem.topic}` : "Learn maths, one question at a time"}</p>
           <h1>Axiom guides you with focused questions.</h1>
         </div>
         <div className="session-clock" aria-label={`${minutes} minutes and ${seconds} seconds remaining`}><span className="clock-label">Session time</span><strong>{minutes}:{seconds}</strong></div>
         <div className="header-actions">
-          {isPreparing ? <button className="button button-primary" type="button" disabled><span className="button-loader" aria-hidden="true" />Preparing tutor</button> : sessionState !== "active" ? <button className="button button-primary" type="button" onClick={() => void startSession()} disabled={intakeState !== "confirmed"}><Icon name="play" />{sessionState === "ended" ? "Start again" : intakeState === "confirmed" ? "Retry session" : "Starts after crop"}</button> : <button className="button button-quiet button-danger" type="button" onClick={() => void endSession()}><Icon name="stop" />End session</button>}
+          {isPreparing ? <button className="button button-primary" type="button" disabled><span className="button-loader" aria-hidden="true" />Preparing tutor</button> : sessionState !== "active" ? <button className="button button-primary" type="button" onClick={() => void startSession()} disabled={intakeState !== "confirmed"}><Icon name="play" />{sessionState === "ended" ? "Start again" : intakeState === "confirmed" ? "Retry session" : "Choose a question"}</button> : <button className="button button-quiet button-danger" type="button" onClick={() => void endSession()}><Icon name="stop" />End session</button>}
         </div>
       </header>
 
@@ -829,10 +874,7 @@ export function TutorSession() {
           </div>
           </aside>
 
-          <section className="board-panel" aria-labelledby="board-heading">
-            <div className="board-heading"><div><p className="overline">Shared workspace</p><h2 id="board-heading">Tutor board</h2></div><span className="board-owner"><span aria-hidden="true" /> Tutor controlled</span></div>
-            <div className="board-waiting"><Icon name="image" /><div><span>Your problem will appear here</span><p>Upload a textbook page, then crop the one question you want to solve.</p></div></div>
-          </section>
+          <SampleGallery onSelect={handleStartSample} disabled={isPreparing} />
         </div>
       ) : croppedUrl ? (
         <div className="session-workspace">

@@ -79,6 +79,24 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .upload-empty h3 { margin: 20px 0 7px; font-family: Georgia, serif; font-size: 22px; font-weight: 500; }
 .upload-empty p { max-width: 250px; margin: 0 0 20px; color: var(--graphite-soft); font-size: 12px; line-height: 1.5; }
 .upload-empty > span:last-child { margin-top: 12px; color: var(--graphite-faint); font-size: 10px; }
+.sample-panel { padding: 20px; }
+.sample-intro { margin: 10px 0 20px; color: var(--graphite-soft); font-size: 13px; line-height: 1.5; }
+.sample-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sample-card { min-width: 0; padding: 0; overflow: hidden; border: 1px solid var(--rule); border-radius: var(--radius-medium); background: var(--notebook); text-align: left; cursor: pointer; }
+.sample-card:hover { border-color: var(--pine); box-shadow: 0 3px 12px rgba(40,90,74,.1); }
+.sample-card:disabled { opacity: .5; cursor: wait; }
+.sample-card > img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: contain; background: #eee7d8; }
+.sample-card-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px; }
+.sample-card-caption .overline { display: block; margin-bottom: 5px; }
+.sample-card-caption strong { display: block; font-size: 13px; line-height: 1.4; }
+.sample-start { display: grid; flex-shrink: 0; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: var(--pine); background: var(--pine-wash); }
+.sample-start svg { width: 15px; height: 15px; }
+@media (max-width: 620px) {
+  .intake-workspace .sample-panel { grid-row: 1; padding: 14px; }
+  .sample-grid { gap: 10px; }
+  .sample-card-caption { padding: 10px; }
+  .sample-start { display: none; }
+}
 .crop-help { margin: 16px 0 -5px; color: var(--graphite-soft); font-size: 12px; line-height: 1.5; }
 .crop-preview { position: relative; touch-action: none; }
 .crop-preview > img { user-select: none; -webkit-user-drag: none; }
