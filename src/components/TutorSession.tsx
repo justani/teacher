@@ -95,6 +95,7 @@ function TranscriptPanel({
 }) {
   const listRef = useRef<HTMLOListElement>(null);
   const latestTurnId = turns[turns.length - 1]?._id;
+  const latestTurnText = turns[turns.length - 1]?.text;
 
   useEffect(() => {
     if (!latestTurnId) return;
@@ -109,7 +110,7 @@ function TranscriptPanel({
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [latestTurnId]);
+  }, [latestTurnId, latestTurnText]);
 
   return (
     <aside className="transcript-panel" aria-labelledby="transcript-heading">
@@ -843,7 +844,7 @@ export function TutorSession() {
   }
 
   return (
-    <main className="session-shell">
+    <main className={`session-shell ${intakeState === "confirmed" && croppedUrl ? "session-shell-active" : ""}`}>
       <header className="session-header">
         <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">∠</span><div><span className="brand-name">Axiom</span><span className="brand-context">Personal maths session</span></div></div>
         <div className="session-guidance">
@@ -879,33 +880,30 @@ export function TutorSession() {
       ) : croppedUrl ? (
         <div className="session-workspace">
           <div className="learning-column">
-            <section className="cropped-problem-panel" aria-labelledby="selected-problem-heading">
-              <div className="cropped-problem-heading">
-                <div><p className="overline">Your question</p><h2 id="selected-problem-heading">Selected problem</h2></div>
-                <div className="problem-actions">
-                  <button type="button" onClick={() => setIntakeState("crop")} disabled={isPreparing}><Icon name="crop" />Adjust crop</button>
-                  <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isPreparing}><Icon name="upload" />Change photo</button>
-                </div>
-              </div>
-              {isPreparing ? (
-                <div className="preparation-loader" role="status" aria-live="polite">
-                  <span className="preparation-spinner" aria-hidden="true" />
-                  <strong>Reading your question</strong>
-                  <p>Extracting the problem and preparing the tutor’s first question…</p>
-                </div>
-              ) : learnerView?.problemText ? (
-                <div className="extracted-problem-text">
-                  <span>Extracted question</span>
-                  <p>{learnerView.problemText}</p>
-                </div>
-              ) : (
-                <div className="cropped-problem-image"><img src={croppedUrl} alt="Confirmed cropped maths problem" /></div>
-              )}
-              <span className="source-file">{fileName}</span>
-            </section>
-
             <section className="board-panel session-board" aria-labelledby="board-heading">
               <div className="board-heading"><div><p className="overline">Shared workspace</p><h2 id="board-heading">Working board</h2></div><span className="board-owner"><span aria-hidden="true" /> Shared by you and your tutor</span></div>
+              <div className="board-question" aria-label="Problem statement">
+                <div className="board-question-heading">
+                  <p className="overline">Your question</p>
+                  <div className="problem-actions">
+                    <button type="button" onClick={() => setIntakeState("crop")} disabled={isPreparing}><Icon name="crop" />Adjust crop</button>
+                    <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isPreparing}><Icon name="upload" />Change photo</button>
+                  </div>
+                </div>
+                {isPreparing ? (
+                  <div className="preparation-loader" role="status" aria-live="polite">
+                    <span className="preparation-spinner" aria-hidden="true" />
+                    <strong>Reading your question</strong>
+                    <p>Extracting the problem and preparing the tutor’s first question…</p>
+                  </div>
+                ) : learnerView?.problemText ? (
+                  <div className="extracted-problem-text">
+                    <p>{learnerView.problemText}</p>
+                  </div>
+                ) : (
+                  <div className="cropped-problem-image"><img src={croppedUrl} alt="Confirmed cropped maths problem" /></div>
+                )}
+              </div>
               <SharedMathBoard
                 ref={boardRef}
                 editable={sessionState === "active" && voiceState === "listening" && !isRecording}

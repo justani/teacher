@@ -64,7 +64,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .workspace { display: grid; grid-template-columns: minmax(310px, 0.82fr) minmax(560px, 1.8fr); gap: 16px; min-height: 570px; }
 .session-workspace { display: grid; grid-template-columns: minmax(620px, 1.85fr) minmax(300px, .72fr); align-items: start; gap: 16px; }
 .learning-column { display: grid; min-width: 0; gap: 16px; }
-.problem-panel, .board-panel, .cropped-problem-panel, .transcript-panel { min-width: 0; border: 1px solid var(--rule); border-radius: var(--radius-large); background: var(--notebook); box-shadow: var(--shadow-sheet); }
+.problem-panel, .board-panel, .transcript-panel { min-width: 0; border: 1px solid var(--rule); border-radius: var(--radius-large); background: var(--notebook); box-shadow: var(--shadow-sheet); }
 .problem-panel { display: flex; flex-direction: column; padding: 20px; }
 .panel-heading, .board-heading { display: flex; align-items: center; justify-content: space-between; }
 .panel-heading h2, .board-heading h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 21px; font-weight: 500; letter-spacing: -.02em; }
@@ -145,9 +145,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .confirmed-source button { grid-column: 2; grid-row: 1; align-self: center; margin: 0; }
 .change-photo { width: 100%; }
 
-.cropped-problem-panel { padding: 20px; }
-.cropped-problem-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.cropped-problem-heading h2, .transcript-heading h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 21px; font-weight: 500; letter-spacing: -.02em; }
+.transcript-heading h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 21px; font-weight: 500; letter-spacing: -.02em; }
 .problem-actions { display: flex; gap: 4px; }
 .problem-actions button { display: inline-flex; min-height: 40px; align-items: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 9px; color: var(--pine); background: transparent; font-size: 11px; font-weight: 800; cursor: pointer; }
 .problem-actions button:hover { background: var(--pine-wash); }
@@ -166,6 +164,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .board-panel { display: flex; min-height: 0; flex-direction: column; padding: 22px; background: repeating-linear-gradient(to bottom, transparent 0, transparent 31px, rgba(50, 96, 119, .055) 32px), var(--notebook); }
 .session-board { min-height: 500px; }
+.session-board > .board-heading { gap: 12px; flex-wrap: wrap; }
+.board-question { margin-top: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--rule); }
+.board-question-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.board-question-heading .overline { margin: 0; }
+.board-question .extracted-problem-text { min-height: 0; margin-top: 8px; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.board-question .extracted-problem-text p { max-width: none; margin: 0; font-size: clamp(18px, 1.6vw, 22px); }
+.board-question .preparation-loader { min-height: 140px; margin-top: 8px; padding: 16px; }
+.board-question .cropped-problem-image { min-height: 0; margin-top: 8px; background: transparent; box-shadow: none; }
+.board-question .cropped-problem-image img { max-height: 240px; }
+.board-question .problem-actions { flex-direction: row; flex-wrap: wrap; }
 .board-owner { display: inline-flex; align-items: center; gap: 7px; color: var(--graphite-faint); font-size: 11px; font-weight: 700; }
 .board-owner > span { width: 7px; height: 7px; border-radius: 50%; background: var(--pine); box-shadow: 0 0 0 4px var(--pine-wash); }
 .board-waiting { display: grid; min-height: 470px; place-items: center; align-content: center; padding: 40px; text-align: center; }
@@ -286,9 +294,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .session-shell { width: min(100% - 24px, 760px); }
   .workspace, .session-workspace { grid-template-columns: 1fr; }
   .learning-column { display: contents; }
-  .cropped-problem-panel { order: 1; }
   .conversation-column { position: static; order: 2; max-height: none; grid-template-rows: auto auto; }
-  .session-board { order: 3; }
+  .session-board { order: 1; }
   .problem-preview { min-height: 430px; }
   .voice-dock { grid-template-columns: 1fr auto; }
   .state-preview { grid-column: 1 / -1; grid-row: 2; order: 3; padding-top: 10px; border-top: 1px solid var(--rule-soft); }
@@ -302,7 +309,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .session-clock { grid-row: 2; grid-column: 2; align-self: stretch; display: grid; align-content: center; padding-top: 8px; border-top: 1px solid var(--rule-soft); }
   .brand-context { display: none; }
   .button { min-height: 40px; padding: 0 12px; }
-  .problem-panel, .board-panel, .cropped-problem-panel, .transcript-panel { border-radius: 18px; }
+  .problem-panel, .board-panel, .transcript-panel { border-radius: 18px; }
   .problem-panel { padding: 14px; }
   .mock-photo, .problem-preview > img { min-height: 330px; }
   .upload-empty { min-height: 360px; }
@@ -311,8 +318,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .worksheet { width: 88%; min-height: 78%; padding: 30px 23px 35px 42px; }
   .question-number { top: 32px; left: 15px; }
   .board-panel { padding: 16px; }
-  .cropped-problem-panel { padding: 16px; }
-  .cropped-problem-heading { align-items: flex-start; }
   .problem-actions { flex-direction: column; align-items: flex-end; }
   .cropped-problem-image { min-height: 210px; }
   .transcript-panel { padding: 16px; }
@@ -443,4 +448,33 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .lab-stage-heading { align-items: flex-start; }
   .lab-status { white-space: normal; text-align: right; }
   .ledger-run dl { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 8px; }
+}
+
+/* Keep the session controls in view while each workspace scrolls independently. */
+.session-shell-active { display: flex; height: 100dvh; min-height: 0; flex-direction: column; gap: 16px; padding-bottom: 16px; overflow: hidden; }
+.session-shell-active .session-header { flex-shrink: 0; }
+.session-shell-active .session-workspace { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1.85fr) minmax(320px, .85fr); align-items: stretch; }
+.session-shell-active .learning-column { display: grid; min-height: 0; }
+.session-shell-active .session-board { min-height: 0; overflow: hidden; }
+.session-shell-active .board-heading { flex-shrink: 0; }
+.session-shell-active .board-question { flex-shrink: 0; max-height: 30%; overflow: auto; overscroll-behavior: contain; }
+.session-shell-active .math-board { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); box-shadow: none; }
+.session-shell-active .math-board-canvas { min-height: 0; }
+.session-shell-active .conversation-column { position: static; min-height: 0; max-height: none; grid-template-rows: minmax(0, 1fr) auto; }
+.session-shell-active .transcript-list { overscroll-behavior: contain; scrollbar-gutter: stable; overflow-wrap: anywhere; }
+.session-shell-active .voice-dock { align-self: end; }
+
+@media (max-width: 960px) {
+  .session-shell-active { gap: 8px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .session-shell-active .session-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(250px, .85fr); gap: 8px; }
+  .session-shell-active .session-board { padding: 12px; }
+  .session-shell-active .board-question { margin-top: 6px; padding-bottom: 6px; }
+  .session-shell-active .math-board { margin-top: 6px; }
+  .session-shell-active .conversation-column { gap: 6px; }
+  .session-shell-active .transcript-panel { padding: 10px 12px; }
+  .session-shell-active .transcript-heading { padding-bottom: 6px; }
+  .session-shell-active .transcript-heading .overline { display: none; }
+  .session-shell-active .text-composer { padding-top: 6px; }
+  .session-shell-active .text-composer label, .session-shell-active .text-composer > p { display: none; }
+  .session-shell-active .voice-instruction { display: none; }
 }
