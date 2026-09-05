@@ -276,7 +276,9 @@ const schema = defineSchema({
     completed: v.boolean(),
   }),
   tutorSessions: defineTable({
-    problemImageId: v.id("_storage"),
+    problemImageId: v.optional(v.id("_storage")),
+    sampleId: v.optional(v.string()),
+    samplePreparationVersion: v.optional(v.number()),
     sourceFileName: v.string(),
     status: sessionStatus,
     problemText: v.optional(v.string()),

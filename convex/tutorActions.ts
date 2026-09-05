@@ -796,50 +796,60 @@ export const prepare = action({
     if (!session) throw new ConvexError("Session not found.");
 
     try {
-      const imageLoadStartedAt = Date.now();
-      let image: Blob | null;
-      try {
-        image = await ctx.storage.get(session.problemImageId);
-      } finally {
-        imageLoadMs = elapsedMs(imageLoadStartedAt);
-      }
-      if (!image) throw new ConvexError("The cropped image is no longer available.");
-      if (image.size > 8 * 1024 * 1024) {
-        throw new ConvexError("Please crop a smaller image under 8 MB.");
-      }
-
-      const { provider, model } = createGeminiProvider();
-      stage = "extraction";
-      const extractionStartedAt = Date.now();
+      // Sample preparation is snapshotted at session creation, so later catalog
+      // revisions cannot change an existing learner's problem or teaching plan.
       let preparation: z.infer<typeof preparationSchema>;
-      try {
-        const result: { object: z.infer<typeof preparationSchema> } = await generateObject({
-          model: provider(model),
-          schema: preparationSchema,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: `Read the single school maths problem in this cropped image and privately prepare a tutor to teach it Socratically.
+      if (session.sampleId) {
+        if (!session.preparation) throw new ConvexError("The sample preparation is missing.");
+        preparation = preparationSchema.parse(session.preparation);
+        imageLoadMs = 0;
+        extractionMs = 0;
+      } else {
+        if (!session.problemImageId) throw new ConvexError("The question photo is missing.");
+        const imageLoadStartedAt = Date.now();
+        let image: Blob | null;
+        try {
+          image = await ctx.storage.get(session.problemImageId);
+        } finally {
+          imageLoadMs = elapsedMs(imageLoadStartedAt);
+        }
+        if (!image) throw new ConvexError("The cropped image is no longer available.");
+        if (image.size > 8 * 1024 * 1024) {
+          throw new ConvexError("Please crop a smaller image under 8 MB.");
+        }
+
+        const { provider, model } = createGeminiProvider();
+        stage = "extraction";
+        const extractionStartedAt = Date.now();
+        try {
+          const result: { object: z.infer<typeof preparationSchema> } = await generateObject({
+            model: provider(model),
+            schema: preparationSchema,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: `Read the single school maths problem in this cropped image and privately prepare a tutor to teach it Socratically.
 
 Transcribe the complete problem faithfully, including labels, symbols, units, and any diagram information needed to solve it. Compute and verify the answer yourself. Build a solution map and flexible teaching moves, not a dialogue script.
 
 If the image is ambiguous or incomplete, set confidence to low and explain exactly what clarification is needed. Do not invent missing numbers or diagram labels. Keep arrays compact and ordered from least help to most help.`,
-                },
-                {
-                  type: "image",
-                  image: new Uint8Array(await image.arrayBuffer()),
-                  mediaType: image.type || "image/jpeg",
-                },
-              ],
-            },
-          ],
-        });
-        preparation = result.object;
-      } finally {
-        extractionMs = elapsedMs(extractionStartedAt);
+                  },
+                  {
+                    type: "image",
+                    image: new Uint8Array(await image.arrayBuffer()),
+                    mediaType: image.type || "image/jpeg",
+                  },
+                ],
+              },
+            ],
+          });
+          preparation = result.object;
+        } finally {
+          extractionMs = elapsedMs(extractionStartedAt);
+        }
       }
 
       if (preparation.confidence === "low" || preparation.clarificationNeeded) {
@@ -916,11 +926,13 @@ Return exactly one short, complete Hinglish question. Use no preamble and no exp
       });
       throw new ConvexError(message);
     } finally {
-      await ctx
-        .runMutation(internal.tutorSessions.deleteStorageObject, {
-          storageId: session.problemImageId,
-        })
-        .catch((error) => console.error("Could not delete problem image", error));
+      if (session.problemImageId) {
+        await ctx
+          .runMutation(internal.tutorSessions.deleteStorageObject, {
+            storageId: session.problemImageId,
+          })
+          .catch((error) => console.error("Could not delete problem image", error));
+      }
       await ctx
         .runMutation(internal.tutorSessions.recordBackendLatency, {
           sessionId: args.sessionId,

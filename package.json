@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "convex:dev": "convex dev"
+    "convex:dev": "convex dev",
+    "test": "vitest run"
   },
   "dependencies": {
     "@ai-sdk/google-vertex": "^5.0.69",
@@ -23,11 +24,14 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "convex-test": "^0.0.56",
     "eslint": "latest",
     "eslint-config-next": "16.3.3",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "^5.0.0"
   }
 }

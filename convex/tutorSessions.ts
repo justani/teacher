@@ -1,5 +1,6 @@
 import { createThread } from "@convex-dev/agent";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
+import { getSamplePreparation } from "./samplePreparations";
 import { components } from "./_generated/api";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import schema, {
@@ -23,18 +24,32 @@ export const generateUploadUrl = mutation({
 
 export const create = mutation({
   args: {
-    problemImageId: v.id("_storage"),
-    sourceFileName: v.string(),
+    problemImageId: v.optional(v.id("_storage")),
+    sourceFileName: v.optional(v.string()),
+    sampleId: v.optional(v.string()),
   },
   returns: v.id("tutorSessions"),
   handler: async (ctx, args) => {
-    const sourceFileName = args.sourceFileName.trim().slice(0, 160) || "problem.jpg";
+    if ((args.sampleId !== undefined) === (args.problemImageId !== undefined)) {
+      throw new ConvexError("Choose a sample or upload a question photo.");
+    }
+    const sample = args.sampleId !== undefined ? getSamplePreparation(args.sampleId) : null;
+    if (args.sampleId !== undefined && !sample) throw new ConvexError("Unknown sample question.");
+    const sourceFileName = sample
+      ? `grade-${sample.grade}-${sample.id}.png`
+      : args.sourceFileName?.trim().slice(0, 160) || "problem.jpg";
     const agentThreadId = await createThread(ctx, components.agent, {
       title: `Math problem: ${sourceFileName}`,
     });
 
     return ctx.db.insert("tutorSessions", {
       problemImageId: args.problemImageId,
+      ...(sample ? {
+        sampleId: sample.id,
+        samplePreparationVersion: sample.version,
+        preparation: sample.preparation,
+        problemText: sample.preparation.problemText,
+      } : {}),
       sourceFileName,
       status: "preparing",
       agentThreadId,

@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import Image from "next/image";
+import { SAMPLE_PROBLEMS, type SampleProblem } from "../../shared/sampleProblems";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -36,16 +37,6 @@ type ResponseTiming = { flow: "opening" | "learner_turn"; startedAt: number };
 
 const DEFAULT_CROP: CropSelection = { x: 8, y: 18, width: 84, height: 38 };
 const MIN_CROP_PERCENT = 6;
-const SAMPLE_PROBLEMS = [
-  { id: "chocolate-fractions", grade: 5, topic: "Sharing a chocolate bar", question: "Riya ate 1/4 of a chocolate bar. Aman ate 1/2 of the same bar. What fraction did they eat altogether?" },
-  { id: "straight-line-angles", grade: 7, topic: "Angles on a straight line", question: "Two angles together form a straight angle. One is 65°. How large is the other?" },
-  { id: "rectangle-coordinates", grade: 8, topic: "The missing corner", question: "Plot A(1, 1), B(5, 1), and C(5, 4). Where should D be to complete rectangle ABCD?" },
-  { id: "fractions", grade: 5, topic: "Adding fractions", question: "Add the fractions: 1/4 + 2/4 = ?" },
-  { id: "area", grade: 6, topic: "Area of a rectangle", question: "A rectangle is 8 cm long and 5 cm wide. What is its area?" },
-  { id: "percentages", grade: 7, topic: "Everyday percentages", question: "A bag costs Rs 200. It is on sale at 10% off. What is the sale price?" },
-  { id: "equations", grade: 8, topic: "Solving an equation", question: "Find the value of x: 3x + 5 = 20." },
-] as const;
-type SampleProblem = (typeof SAMPLE_PROBLEMS)[number];
 
 const voiceCopy: Record<VoiceState, { label: string; detail: string }> = {
   listening: { label: "Your turn", detail: "" },
@@ -274,7 +265,7 @@ export function TutorSession() {
     setSessionState("ready");
     setSessionId(null);
     setSecondsRemaining(15 * 60);
-    void startSession(imageUrl, sampleFileName);
+    void startSession(imageUrl, sampleFileName, sample.id);
   }
 
   function beginCropInteraction(event: ReactPointerEvent<HTMLElement>, mode: CropMode) {
@@ -331,7 +322,8 @@ export function TutorSession() {
     const croppedImageUrl = canvas.toDataURL("image/jpeg", 0.92);
     setCroppedUrl(croppedImageUrl);
     setIntakeState("confirmed");
-    void startSession(croppedImageUrl);
+    setSampleProblem(null);
+    void startSession(croppedImageUrl, fileName, null);
   }
 
   function getAudioContext() {
@@ -501,7 +493,11 @@ export function TutorSession() {
     }
   }
 
-  async function startSession(problemImageUrl = croppedUrl, sourceFileName = fileName) {
+  async function startSession(
+    problemImageUrl = croppedUrl,
+    sourceFileName = fileName,
+    sampleId: SampleProblem["id"] | null = sampleProblem?.id ?? null,
+  ) {
     if (!problemImageUrl || sessionState === "active" || isPreparing) return;
     const startedAt = performance.now();
     logFrontendTiming("opening_started", startedAt, { flow: "opening" });
@@ -512,15 +508,20 @@ export function TutorSession() {
 
     try {
       await getAudioContext().resume();
-      const imageResponse = await fetch(problemImageUrl);
-      if (!imageResponse.ok) throw new Error("The question photo could not be loaded. Please try again.");
-      const imageBlob = await imageResponse.blob();
-      const problemImageId = await uploadBlob(imageBlob);
-      logFrontendTiming("problem_image_uploaded", startedAt, { flow: "opening" });
-      const newSessionId = await createTutorSession({
-        problemImageId,
-        sourceFileName: sourceFileName || "problem.jpg",
-      });
+      let newSessionId: Id<"tutorSessions">;
+      if (sampleId) {
+        newSessionId = await createTutorSession({ sampleId });
+      } else {
+        const imageResponse = await fetch(problemImageUrl);
+        if (!imageResponse.ok) throw new Error("The question photo could not be loaded. Please try again.");
+        const imageBlob = await imageResponse.blob();
+        const problemImageId = await uploadBlob(imageBlob);
+        logFrontendTiming("problem_image_uploaded", startedAt, { flow: "opening" });
+        newSessionId = await createTutorSession({
+          problemImageId,
+          sourceFileName: sourceFileName || "problem.jpg",
+        });
+      }
       setSessionId(newSessionId);
       logFrontendTiming("session_created", startedAt, { flow: "opening" });
       const prepared = await prepareTutor({ sessionId: newSessionId });

@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as samplePreparations from "../samplePreparations.js";
 import type * as tasks from "../tasks.js";
 import type * as tutorActions from "../tutorActions.js";
 import type * as tutorPrompt from "../tutorPrompt.js";
@@ -20,6 +21,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  samplePreparations: typeof samplePreparations;
   tasks: typeof tasks;
   tutorActions: typeof tutorActions;
   tutorPrompt: typeof tutorPrompt;
